@@ -1,34 +1,7 @@
 # 📖 API Documentation - PaTim Delivery Backend
 > ระบบ Web API จัดการข้อมูลลูกค้าและออเดอร์ร้านป้าติ๋ม ข้าวกล่องเดลิเวอรี (ส่งด่วนมื้อเที่ยง)  
 > **Production Base URL:** `https://backend-pa-tim.vercel.app`  
-> **Local Base URL:** `http://localhost:3000`  
 > 💡 **แนะนำ:** แนะนำเปิดคู่มือนี้บน **Obsidian** หรือ Markdown Reader ที่รองรับการแสดงผล JSON/Code Highlight และ Callout เพื่อความสะดวกและสวยงามในการอ่านเอกสาร
-
----
-
-## ⚙️ การติดตั้งและตั้งค่า Environment (`.env`)
-
-ก่อนเริ่มรันเซิร์ฟเวอร์ ให้ติดตั้ง Dependency และสร้างไฟล์ `.env` ไว้ที่โฟลเดอร์ Root ของโปรเจกต์:
-
-### 1. ติดตั้งแพ็กเกจ
-```bash
-npm install dotenv
-```
-
-### 2. สร้างไฟล์ `.env`
-สร้างไฟล์ชื่อ `.env` ที่โฟลเดอร์หลักของโปรเจกต์ และใส่ค่าการเชื่อมต่อฐานข้อมูล:
-```env
-DB_HOST=pa-tim-db-pa-tim-db.f.aivencloud.com
-DB_PORT=21367
-DB_USER=avnadmin
-DB_PASSWORD=AVNS_mRuBzxAzE8JEfGQGI3v
-DB_NAME=pa_tim_db
-```
-
-### 3. รันเซิร์ฟเวอร์
-```bash
-npx ts-node-dev server.ts
-```
 
 ---
 
