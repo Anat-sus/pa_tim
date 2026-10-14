@@ -7,7 +7,6 @@ import { environment } from '../../../environments/environment';
 import { OrderService, DbOrder } from '../../services/order.service';
 import { CustomerService } from '../../services/customer.service';
 import { OrderItem } from '../../models/order.model';
-import { Customer } from '../../models/customer.model';
 
 export type { OrderItem };
 
@@ -53,14 +52,14 @@ export class OrderManagement implements OnInit, AfterViewInit, OnDestroy {
     lat: number;
     lng: number;
   } = {
-    name: '',
-    phone: '',
-    address: '',
-    menu: 'ข้าวกะเพราหมูกรอบไข่ดาว',
-    boxes: 2,
-    lat: 16.246839,
-    lng: 103.251963,
-  };
+      name: '',
+      phone: '',
+      address: '',
+      menu: 'ข้าวกะเพราหมูกรอบไข่ดาว',
+      boxes: 2,
+      lat: 16.246839,
+      lng: 103.251963,
+    };
 
   // Popular MSU lunch menu list
   menuList = [
@@ -130,6 +129,26 @@ export class OrderManagement implements OnInit, AfterViewInit, OnDestroy {
       o.address.toLowerCase().includes(query) ||
       o.menu.toLowerCase().includes(query)
     );
+  });
+
+  // Helper to check if a customer already has an order in the current orders list
+  isCustomerOrdered(cust: any): boolean {
+    if (!cust) return false;
+    return this.orders().some(o => {
+      const matchId = cust.id != null && o.customer_id != null && String(cust.id) === String(o.customer_id);
+      const matchName = cust.name && o.name && cust.name.trim().toLowerCase() === o.name.trim().toLowerCase();
+      return matchId || matchName;
+    });
+  }
+
+  // Available customers who DO NOT have an order yet
+  availableCustomers = computed(() => {
+    return this.customerPool().filter(c => !this.isCustomerOrdered(c));
+  });
+
+  // Customers who already have an active order
+  orderedCustomers = computed(() => {
+    return this.customerPool().filter(c => this.isCustomerOrdered(c));
   });
 
   // Leaflet map instance & markers
@@ -441,7 +460,8 @@ export class OrderManagement implements OnInit, AfterViewInit, OnDestroy {
    */
   openAddModal(): void {
     const nextId = `ORD-${101 + this.orders().length}`;
-    const defaultCust = this.customerPool()[0] || {
+    const available = this.availableCustomers();
+    const defaultCust = (available.length > 0 ? available[0] : this.customerPool()[0]) || {
       id: 1,
       name: 'คุณพงศกร ใจกล้า',
       phone: '093-778-8990',
@@ -457,7 +477,7 @@ export class OrderManagement implements OnInit, AfterViewInit, OnDestroy {
       phone: defaultCust.phone,
       address: defaultCust.address,
       menu: this.menuList[0],
-      boxes: 2,
+      boxes: 1,
       lat: defaultCust.lat,
       lng: defaultCust.lng,
     };
@@ -478,11 +498,32 @@ export class OrderManagement implements OnInit, AfterViewInit, OnDestroy {
   }
 
   /**
+   * Handle customer dropdown selection
+   */
+  onCustomerChange(customerId: any): void {
+    const cid = Number(customerId);
+    const selected = this.customerPool().find(c => c.id === cid || c.id === customerId);
+    if (selected) {
+      this.formData.customer_id = selected.id;
+      this.formData.name = selected.name;
+      this.formData.phone = selected.phone;
+      this.formData.address = selected.address;
+      this.formData.lat = selected.lat;
+      this.formData.lng = selected.lng;
+    }
+  }
+
+  /**
    * Save newly created order to Database POST /orders (with fallback)
    */
   saveNewOrder(): void {
     if (!this.formData.name || !this.formData.address) {
-      alert('กรุณากรอกชื่อลูกค้าและสถานที่จัดส่ง');
+      this.showToast('⚠️ กรุณาเลือกลูกค้าและสถานที่จัดส่ง');
+      return;
+    }
+
+    if (this.isCustomerOrdered({ id: this.formData.customer_id, name: this.formData.name })) {
+      this.showToast('⚠️ ลูกค้ารายนี้มีออเดอร์ในระบบแล้ว ไม่สามารถเพิ่มซ้ำได้');
       return;
     }
 
@@ -570,14 +611,11 @@ export class OrderManagement implements OnInit, AfterViewInit, OnDestroy {
         this.showToast(`✅ อัปเดตข้อมูล ${cur.id} ใน Database สำเร็จ`);
       },
       error: () => {
-        // Local fallback
+        // Local fallback (อัปเดตเฉพาะเมนูและจำนวนกล่อง)
         const updated = this.orders().map(o => {
           if (o.id === cur.id) {
             return {
               ...o,
-              name: this.formData.name,
-              phone: this.formData.phone,
-              address: this.formData.address,
               menu: this.formData.menu,
               boxes: Number(this.formData.boxes),
             };
