@@ -1,6 +1,6 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
-import { Observable } from 'rxjs';
+import { Observable, retry, timeout } from 'rxjs';
 import { environment } from '../../environments/environment';
 import { Order, CreateOrderDto } from '../models/order.model';
 
@@ -12,11 +12,14 @@ export type DbOrder = Order;
 })
 export class OrderService {
   private http = inject(HttpClient);
-  private apiUrl = `${environment.apiUrl}/orders`;
+  private apiUrl = `${environment.directApiUrl}/orders`;
 
   // 1. ดึงออเดอร์ทั้งหมดพร้อมข้อมูลลูกค้าและระยะทางจาก Database จริง
   getOrders(): Observable<DbOrder[]> {
-    return this.http.get<DbOrder[]>(this.apiUrl);
+    return this.http.get<DbOrder[]>(this.apiUrl).pipe(
+      timeout({ first: 15_000 }),
+      retry({ count: 2, delay: 1_000 }),
+    );
   }
 
   // 2. ดึงออเดอร์ราย ID
