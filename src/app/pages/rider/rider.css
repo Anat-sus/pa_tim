@@ -7,7 +7,6 @@
   z-index: 1;
 }
 
-/* แก้ไขปัญหาหมุด Leaflet แตก/หาย */
 .leaflet-default-icon-path {
   background-image: url('https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png');
 }
