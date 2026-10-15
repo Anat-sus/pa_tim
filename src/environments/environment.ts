@@ -3,7 +3,7 @@ export const environment = {
   apiUrl: '/api',
   directApiUrl: 'https://backend-pa-tim.vercel.app',
   shop: {
-    name: 'ร้านป้าติ๋ม ข้าวกล่องเดลิเวอรี (ส่งด่วนมื้อเที่ยง)',
+    name: 'ร้านป้าติ๋ม',
     lat: 16.246839,
     lng: 103.251963,
     phone: '081-795-8189'

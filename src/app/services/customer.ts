@@ -1,4 +1,4 @@
 import { Service } from '@angular/core';
 
 @Service()
-export class Customer {}
+export class Customer { }
