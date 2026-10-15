@@ -1,1 +1,101 @@
-<p>rider works!</p>
+<div class="min-h-screen bg-slate-50 p-4 md:p-6 max-w-xl mx-auto space-y-4 text-slate-800">
+
+  <!-- Search & Status -->
+  <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 space-y-3">
+    <div class="flex items-center justify-between text-xs font-semibold">
+      <div class="flex items-center gap-2">
+        <span class="bg-orange-100 text-orange-600 px-2 py-0.5 rounded-md">RIDER MOBILE VIEW</span>
+      </div>
+      <div class="flex items-center gap-1.5 text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">
+        <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+        ระบบออนไลน์
+      </div>
+    </div>
+  </div>
+
+  <div class="bg-gradient-to-br from-red-700 via-rose-800 to-slate-900 text-white p-5 rounded-3xl shadow-lg space-y-3">
+    <div class="text-center">
+      <p class="text-xs text-rose-200">📦 รวมออเดอร์รอบส่งนี้ทั้งหมด</p>
+      <div class="text-3xl font-extrabold text-amber-300 my-1">{{ totalBoxes }} <span class="text-base font-normal text-white">กล่อง</span></div>
+      <p class="text-xs text-rose-100">🛵 จำนวนจุดส่งสินค้าทั้งหมด {{ totalStops }} จุด</p>
+    </div>
+  </div>
+
+  <!-- Google Maps Button -->
+  <button (click)="openGoogleMaps()" 
+          class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-4 rounded-2xl shadow-md flex items-center justify-center gap-2 text-sm transition">
+    🗺️ เปิดเส้นทางนำทางทุกจุดใน Google Maps
+  </button>
+
+  <!-- Step-by-Step Delivery List (ข้อมูล Order จริงของเพื่อน) -->
+  <div class="bg-white p-4 rounded-3xl shadow-sm border border-slate-100 space-y-4">
+    <div class="flex justify-between items-center border-b pb-3 border-slate-100">
+      <h3 class="font-bold text-slate-800 text-sm flex items-center gap-1.5">
+        📍 ลำดับการขับไปส่ง (Step-by-Step)
+      </h3>
+    </div>
+
+    <div class="space-y-4">
+      <div *ngFor="let item of deliveryList" class="relative pl-6 border-l-2" 
+           [ngClass]="item.status === 'completed' ? 'border-emerald-500' : 'border-rose-400'">
+        
+        <!-- Timeline Dot -->
+        <span class="absolute -left-[11px] top-0 w-5 h-5 rounded-full flex items-center justify-center text-[10px] text-white font-bold"
+              [ngClass]="item.type === 'pickup' ? 'bg-amber-500' : (item.status === 'completed' ? 'bg-emerald-500' : 'bg-slate-900')">
+          {{ item.type === 'pickup' ? '🛍️' : (item.status === 'completed' ? '✓' : item.id) }}
+        </span>
+
+        <!-- Card Container -->
+        <div class="p-3.5 rounded-2xl border transition"
+             [ngClass]="item.status === 'completed' ? 'bg-emerald-50/50 border-emerald-200' : 'bg-slate-50 border-slate-200'">
+          
+          <div class="flex justify-between items-start">
+            <span class="text-xs font-bold px-2 py-0.5 rounded-md"
+                  [ngClass]="item.type === 'pickup' ? 'bg-amber-100 text-amber-700' : 'bg-slate-200 text-slate-700'">
+              {{ item.title }}
+            </span>
+            <span *ngIf="item.type === 'dropoff'" class="text-xs font-bold text-amber-600 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200">
+              จำนวน {{ item.boxes }} กล่อง
+            </span>
+          </div>
+
+          <p class="font-bold text-sm mt-2 text-slate-800">{{ item.type === 'pickup' ? item.title : item.customerName }}</p>
+          <p class="text-xs text-slate-500 mt-0.5">📍 {{ item.address }}</p>
+
+          <div *ngIf="item.items" class="mt-2 text-xs bg-white p-2 rounded-xl border border-slate-100 text-slate-600 space-y-1">
+            <p>🍱 เมนู: {{ item.items }}</p>
+            <p *ngIf="item.note" class="text-amber-600 font-medium">✏️ หมายเหตุ: {{ item.note }}</p>
+          </div>
+
+          <!-- Action Buttons -->
+          <div class="flex justify-between items-center mt-3 pt-2 border-t border-slate-200/60">
+            <div class="flex gap-1.5">
+              <a *ngIf="item.phone" [href]="'tel:' + item.phone" class="bg-emerald-500 text-white text-xs px-2.5 py-1.5 rounded-lg flex items-center gap-1 font-medium">
+                📞 โทรหาลูกค้า
+              </a>
+              <button (click)="openGoogleMaps()" class="bg-blue-500 text-white text-xs px-2.5 py-1.5 rounded-lg font-medium">
+                🗺️ นำทาง
+              </button>
+            </div>
+
+            <button *ngIf="item.type === 'dropoff'" (click)="toggleStatus(item)" 
+                    class="text-xs px-3 py-1.5 rounded-xl font-bold transition"
+                    [ngClass]="item.status === 'completed' ? 'bg-emerald-100 text-emerald-700' : 'bg-white border border-slate-300 text-slate-700 hover:bg-slate-100'">
+              {{ item.status === 'completed' ? '✓ ส่งสำเร็จแล้ว' : '⭕ กดเพื่อยืนยันส่งแล้ว' }}
+            </button>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Leaflet Map Section -->
+  <div class="bg-white p-4 rounded-3xl shadow-sm border border-slate-100 space-y-3">
+    <h3 class="font-bold text-slate-800 text-sm flex items-center gap-1.5">
+    
+    </h3>
+    <div id="riderMap" class="w-full h-64 rounded-2xl overflow-hidden border border-slate-200 z-0"></div>
+  </div>
+
+</div>
