@@ -1,114 +1,128 @@
 import { inject, Injectable } from '@angular/core';
-import { HttpClient } from '@angular/common/http';
-import { lastValueFrom } from 'rxjs';
+import { HttpClient, HttpParams } from '@angular/common/http';
+import { lastValueFrom, timeout } from 'rxjs';
 import { Api } from '../config/api';
 import { Customer, CreateCustomerDto } from '../models/customer.model';
 
-@Injectable({
-  providedIn: 'root'
-})
+@Injectable({ providedIn: 'root' })
 export class CustomerService {
-  private http = inject(HttpClient);
-  private api = inject(Api);
+  private readonly http = inject(HttpClient);
+  private readonly api = inject(Api);
   private readonly apiUrl = `${this.api.API_ENDPOINT.replace(/\/+$/, '')}/customers`;
 
-  // 1. ดึงรายชื่อลูกค้าทั้งหมด (GET /customers)
-  public async getCustomers(): Promise<Customer[]> {
-    const response: unknown = await lastValueFrom(this.http.get<unknown>(this.apiUrl));
-    const rawList = Array.isArray(response)
+  getCustomers(): Promise<Customer[]> {
+    return this.getList(this.apiUrl);
+  }
+
+  async searchCustomers(keyword: string): Promise<Customer[]> {
+    const term = keyword.trim();
+    if (!term) return this.getCustomers();
+    // API /search รองรับชื่อเท่านั้น จึงจับคู่รหัสจากรายการจริงที่เซิร์ฟเวอร์ส่งกลับ
+    const id = /^(?:CUST-)?(\d+)$/i.exec(term);
+    if (id) {
+      const customers = await this.getCustomers();
+      return customers.filter((customer) => {
+        const customerId = /^(?:CUST-)?(\d+)$/i.exec(String(customer.id));
+        return customerId !== null && Number(customerId[1]) === Number(id[1]);
+      });
+    }
+    return this.getList(`${this.apiUrl}/search`, new HttpParams().set('name', term));
+  }
+
+  getNearbyCustomers(km: number = 1): Promise<Customer[]> {
+    if (!Number.isFinite(km) || km <= 0) {
+      return Promise.reject(new Error('กรุณาระบุรัศมีมากกว่า 0 กิโลเมตร'));
+    }
+    return this.getList(`${this.apiUrl}/near`, new HttpParams().set('km', String(km)));
+  }
+
+  createCustomer(dto: CreateCustomerDto): Promise<unknown> {
+    return lastValueFrom(this.http.post(this.apiUrl, this.toPayload(dto)));
+  }
+
+  updateCustomer(id: number | string, dto: CreateCustomerDto): Promise<unknown> {
+    return lastValueFrom(
+      this.http.put(`${this.apiUrl}/${encodeURIComponent(id)}`, this.toPayload(dto)),
+    );
+  }
+
+  deleteCustomer(id: number | string): Promise<unknown> {
+    return lastValueFrom(this.http.delete(`${this.apiUrl}/${encodeURIComponent(id)}`));
+  }
+
+  private async getList(url: string, params = new HttpParams()): Promise<Customer[]> {
+    const response: unknown = await lastValueFrom(
+      this.http.get<unknown>(url, { params }).pipe(timeout(15_000)),
+    );
+    const list = Array.isArray(response)
       ? response
       : this.isRecord(response) && Array.isArray(response['data'])
         ? response['data']
         : null;
-
-    if (!rawList) {
-      throw new Error('รูปแบบข้อมูลจาก API ไม่ถูกต้อง: ต้องได้รับรายการลูกค้า');
-    }
-
-    return rawList.map(item => this.normalizeCustomer(item));
-  }
-
-  // 2. เพิ่มลูกค้าใหม่ (POST /customers)
-  public async createCustomer(dto: CreateCustomerDto): Promise<unknown> {
-    return lastValueFrom(this.http.post(this.apiUrl, this.toPayload(dto)));
-  }
-
-  // 3. แก้ไขข้อมูลลูกค้า (PUT /customers/:id)
-  public async updateCustomer(id: number | string, dto: CreateCustomerDto): Promise<unknown> {
-    return lastValueFrom(this.http.put(`${this.apiUrl}/${encodeURIComponent(id)}`, this.toPayload(dto)));
-  }
-
-  // 4. ลบข้อมูลลูกค้า (DELETE /customers/:id)
-  public async deleteCustomer(id: number | string): Promise<unknown> {
-    return lastValueFrom(this.http.delete(`${this.apiUrl}/${encodeURIComponent(id)}`));
+    if (!list) throw new Error('รูปแบบข้อมูลจากเซิร์ฟเวอร์ไม่ถูกต้อง: ต้องได้รับรายการลูกค้า');
+    return list.map((customer) => this.normalizeCustomer(customer));
   }
 
   private toPayload(dto: CreateCustomerDto): CreateCustomerDto {
-    const latitude = Number(dto.latitude);
-    const longitude = Number(dto.longitude);
-
-    if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90) {
-      throw new Error('ละติจูดต้องอยู่ระหว่าง -90 ถึง 90');
+    const latitude = this.parseCoordinate(dto.latitude, 'ละติจูด', 90);
+    const longitude = this.parseCoordinate(dto.longitude, 'ลองจิจูด', 180);
+    if (!dto.name.trim() || !dto.phone.trim() || !dto.address.trim()) {
+      throw new Error('กรุณากรอกชื่อ เบอร์โทร และที่อยู่ให้ครบถ้วน');
     }
-    if (!Number.isFinite(longitude) || longitude < -180 || longitude > 180) {
-      throw new Error('ลองจิจูดต้องอยู่ระหว่าง -180 ถึง 180');
-    }
-
     return {
       name: dto.name.trim(),
       phone: dto.phone.trim(),
       address: dto.address.trim(),
       latitude: Number(latitude.toFixed(7)),
-      longitude: Number(longitude.toFixed(7))
+      longitude: Number(longitude.toFixed(7)),
     };
   }
 
   private normalizeCustomer(value: unknown): Customer {
-    if (!this.isRecord(value)) {
-      throw new Error('รูปแบบข้อมูลลูกค้าจาก API ไม่ถูกต้อง');
-    }
-
+    if (!this.isRecord(value)) throw new Error('รูปแบบข้อมูลลูกค้าจากเซิร์ฟเวอร์ไม่ถูกต้อง');
     const id = value['id'];
-    const latitude = this.parseCoordinate(value['latitude'], 'ละติจูด');
-    const longitude = this.parseCoordinate(value['longitude'], 'ลองจิจูด');
-
     if ((typeof id !== 'number' && typeof id !== 'string') || String(id).trim() === '') {
-      throw new Error('ข้อมูลลูกค้าจาก API ไม่มีรหัสลูกค้าที่ถูกต้อง');
+      throw new Error('ข้อมูลลูกค้าจากเซิร์ฟเวอร์ไม่มีรหัสลูกค้าที่ถูกต้อง');
     }
-
-    const name = this.readRequiredString(value, 'name');
-    const phone = this.readRequiredString(value, 'phone');
-    const address = this.readRequiredString(value, 'address');
-
     return {
       id,
-      name,
-      phone,
-      address,
-      latitude,
-      longitude,
-      ...(typeof value['created_at'] === 'string' ? { created_at: value['created_at'] } : {})
+      name: this.readString(value, 'name'),
+      phone: this.readString(value, 'phone'),
+      address: this.readString(value, 'address'),
+      latitude: this.parseCoordinate(value['latitude'], 'ละติจูด', 90),
+      longitude: this.parseCoordinate(value['longitude'], 'ลองจิจูด', 180),
+      ...(typeof value['created_at'] === 'string' ? { created_at: value['created_at'] } : {}),
+      ...(value['distance_km'] !== undefined
+        ? { distance_km: this.parseDistance(value['distance_km']) }
+        : {}),
     };
   }
 
-  private parseCoordinate(value: unknown, label: string): number {
-    const coordinate = typeof value === 'number' || typeof value === 'string'
-      ? Number(value)
-      : Number.NaN;
-
-    if (!Number.isFinite(coordinate)) {
-      throw new Error(`ข้อมูลลูกค้าจาก API มี${label}ไม่ถูกต้อง`);
+  private parseCoordinate(value: unknown, label: string, limit: number): number {
+    const number =
+      typeof value === 'number' || (typeof value === 'string' && value.trim() !== '')
+        ? Number(value)
+        : Number.NaN;
+    if (!Number.isFinite(number) || Math.abs(number) > limit) {
+      throw new Error(`${label}ต้องเป็นตัวเลขระหว่าง ${-limit} ถึง ${limit}`);
     }
-
-    return coordinate;
+    return number;
   }
 
-  private readRequiredString(value: Record<string, unknown>, field: string): string {
-    const fieldValue = value[field];
-    if (typeof fieldValue !== 'string') {
-      throw new Error(`ข้อมูลลูกค้าจาก API ไม่มีฟิลด์ ${field} ที่ถูกต้อง`);
-    }
-    return fieldValue;
+  private parseDistance(value: unknown): number {
+    const distance =
+      typeof value === 'number' || (typeof value === 'string' && value.trim() !== '')
+        ? Number(value)
+        : Number.NaN;
+    if (!Number.isFinite(distance) || distance < 0)
+      throw new Error('ระยะทางลูกค้าจากเซิร์ฟเวอร์ไม่ถูกต้อง');
+    return distance;
+  }
+
+  private readString(value: Record<string, unknown>, field: string): string {
+    if (typeof value[field] !== 'string')
+      throw new Error(`ข้อมูลลูกค้าจากเซิร์ฟเวอร์ไม่มีฟิลด์ ${field} ที่ถูกต้อง`);
+    return value[field];
   }
 
   private isRecord(value: unknown): value is Record<string, unknown> {

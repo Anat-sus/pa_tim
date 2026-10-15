@@ -1,190 +1,287 @@
-<div class="min-h-screen bg-slate-100 p-6">
-  <div class="max-w-[1400px] mx-auto space-y-6">
-
-    <!-- Header -->
-    <div class="bg-white rounded-2xl p-6 shadow-sm border border-slate-200/80 flex flex-col md:flex-row md:items-center justify-between gap-4">
+<main class="customer-page">
+  <div class="customer-content">
+    <header class="panel page-heading">
       <div>
-        <div class="flex items-center gap-2 mb-1.5">
-          <span class="bg-blue-100 text-blue-700 text-xs font-bold px-2.5 py-1 rounded-md">
-            CUSTOMER DATABASE
-          </span>
-          <span class="text-xs text-slate-500">บันทึกอัตโนมัติลง Backend API</span>
-        </div>
-        <h1 class="text-2xl font-black text-slate-800 flex items-center gap-2">
-          <span>👥</span> จัดการข้อมูลลูกค้าและพิกัดบ้าน
-        </h1>
-        <p class="text-sm text-slate-500 mt-1">
-          มีข้อมูลลูกค้าในระบบทั้งหมด {{ customers().length }} ท่าน รอบ มมส ขามเรียง & ท่าขอนยาง (พร้อมพิกัด GPS)
-        </p>
+        <span class="eyebrow">CUSTOMER MANAGEMENT</span>
+        <h1>จัดการข้อมูลลูกค้าและพิกัดบ้าน</h1>
+        <p>บันทึกข้อมูลลูกค้าและเลือกจุดจัดส่งรอบมหาวิทยาลัยมหาสารคาม ภายในรัศมี 3 กม.</p>
       </div>
-
-      <button (click)="openAddModal()"
-        class="btn bg-blue-600 hover:bg-blue-700 text-white font-medium px-5 rounded-xl border-none shadow-md flex items-center gap-2">
-        <span class="text-lg leading-none">+</span> เพิ่มลูกค้าใหม่
+      <button type="button" class="button primary" (click)="openAddForm()" [disabled]="isBusy()">
+        + เพิ่มลูกค้าใหม่
       </button>
-    </div>
+    </header>
 
-    <!-- Layout Grid -->
-    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-
-      <!-- ฝั่งซ้าย: แผนที่หลัก -->
-      <div class="lg:col-span-5 bg-white rounded-2xl p-4 shadow-sm border border-slate-200/80 relative">
-        <div class="flex items-center justify-between pb-3 px-1 border-b border-slate-100 mb-3">
-          <div class="flex items-center gap-1.5 text-sm font-bold text-slate-700">
-            <span class="text-rose-500">📍</span>
-            <span>แผนที่หมุดที่อยู่ลูกค้าทั้งหมด ({{ customers().length }} จุด)</span>
-          </div>
-          <span class="text-xs text-slate-400">คลิกหมุดดูข้อมูล</span>
+    <section class="panel filters" aria-label="ค้นหาและกรองลูกค้า">
+      <form class="search-form" (ngSubmit)="onSearch()">
+        <label for="customer-search">ค้นหาชื่อลูกค้าหรือรหัสลูกค้า</label>
+        <div class="input-action">
+          <input
+            id="customer-search"
+            name="keyword"
+            [(ngModel)]="searchKeyword"
+            placeholder="เช่น สมชาย หรือ CUST-001"
+            [disabled]="isBusy()"
+          />
+          <button type="submit" class="button primary" [disabled]="isBusy()">ค้นหา</button>
         </div>
-
-        <div class="relative">
-          <div id="main-customer-map" class="map-container border border-slate-200"></div>
-
-          <div class="absolute bottom-3 left-3 z-[400] bg-white/95 rounded-lg p-2.5 shadow-md border border-slate-200 text-xs space-y-1.5">
-            <div class="flex items-center gap-2">
-              <span>🍱</span>
-              <span class="font-medium text-slate-700">ครัวกลาง (มมส ขามเรียง)</span>
-            </div>
-            <div class="flex items-center gap-2">
-              <span class="w-3.5 h-3.5 bg-blue-600 rounded-full inline-block"></span>
-              <span class="font-medium text-slate-700">บ้าน/หอพักลูกค้า</span>
-            </div>
-          </div>
+      </form>
+      <form class="radius-form" (ngSubmit)="onFilterNearby()">
+        <label for="customer-radius">รัศมีจากร้าน (กม.)</label>
+        <div class="input-action">
+          <input
+            id="customer-radius"
+            name="radius"
+            type="number"
+            min="0.1"
+            max="3"
+            step="0.1"
+            required
+            [(ngModel)]="radiusKm"
+            [disabled]="isBusy()"
+          />
+          <button type="submit" class="button secondary" [disabled]="isBusy()">
+            กรองในรัศมี {{ radiusKm ?? 1 }} กม.
+          </button>
         </div>
+      </form>
+      <button
+        type="button"
+        class="button secondary reset-filters"
+        (click)="resetFilters()"
+        [disabled]="isBusy()"
+      >
+        รีเซ็ตตัวกรอง
+      </button>
+    </section>
+
+    @if (loadError(); as error) {
+      <div role="alert" class="notice error">
+        <span>{{ error }}</span>
+        <button type="button" (click)="loadDataAsync()" [disabled]="isBusy()">ลองโหลดใหม่</button>
       </div>
+    }
+    @if (feedback(); as message) {
+      <p role="status" class="notice success">{{ message }}</p>
+    }
 
-      <!-- ฝั่งขวา: ตารางรายชื่อลูกค้า -->
-      <div class="lg:col-span-7 bg-white rounded-2xl p-5 shadow-sm border border-slate-200/80 flex flex-col gap-4">
-        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div class="relative flex-1">
-            <span class="absolute inset-y-0 left-0 flex items-center pl-3.5 text-slate-400 text-sm">🔍</span>
-            <input type="text"
-              [value]="searchKeyword()"
-              (input)="onSearchInput($event)"
-              placeholder="ค้นหาชื่อลูกค้า, เบอร์โทร, หรือที่อยู่..."
-              class="input w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-blue-500" />
-          </div>
-          <div class="text-xs text-slate-500 font-medium">
-            แสดง {{ filteredCustomers().length }} รายการ
+    <div class="customer-overview">
+      <section class="panel map-panel" aria-label="แผนที่ลูกค้า">
+        <div class="section-heading">
+          <h2>แผนที่ตำแหน่งลูกค้า</h2>
+          <span>{{ customers().length }} จุด</span>
+        </div>
+        <p class="hint">
+          คลิกหมุดบ้านเพื่อดูข้อมูลลูกค้า เพิ่มหรือแก้ไขลูกค้าเพื่อเลือกพิกัดจัดส่ง
+        </p>
+        <div id="main-customer-map" class="map-container"></div>
+        <div class="map-legend"><span>🔴 ร้านป้าติ๋ม</span><span>🔵 บ้านลูกค้า</span></div>
+      </section>
+
+      <section class="panel table-panel" [attr.aria-busy]="isLoading()">
+        <div class="section-heading">
+          <div>
+            <h2>รายชื่อลูกค้า</h2>
+            <p class="hint">
+              @if (appliedSearch()) {
+                คำค้นหา “{{ appliedSearch() }}” ·
+              }
+              @if (appliedRadius() !== null) {
+                ภายใน {{ appliedRadius() }} กม. ·
+              }
+              {{ isLoading() ? 'กำลังโหลดข้อมูล...' : 'แสดง ' + customers().length + ' รายการ' }}
+            </p>
           </div>
         </div>
-
-        <div class="overflow-x-auto rounded-xl border border-slate-100 max-h-[460px]">
-          <table class="table w-full text-left text-sm">
-            <thead class="bg-slate-50 text-slate-500 text-xs uppercase sticky top-0 z-10 border-b border-slate-200">
+        <div class="table-scroll">
+          <table>
+            <thead>
               <tr>
-                <th class="py-3 px-3">รหัส</th>
-                <th class="py-3 px-4">ชื่อลูกค้า</th>
-                <th class="py-3 px-4">เบอร์โทร</th>
-                <th class="py-3 px-4">ที่อยู่ / จุดสังเกต</th>
-                <th class="py-3 px-3 text-center">จัดการ</th>
+                <th>รหัสลูกค้า</th>
+                <th>ชื่อ - นามสกุล</th>
+                <th>เบอร์โทร</th>
+                <th>ที่อยู่ / จุดสังเกต</th>
+                <th>พิกัด Lat / Lng</th>
+                <th>จัดการ</th>
               </tr>
             </thead>
-            <tbody class="divide-y divide-slate-100 text-slate-700">
-              @for (cust of filteredCustomers(); track cust.id) {
-                <tr (click)="focusCustomerOnMap(cust)" class="hover:bg-blue-50/50 cursor-pointer">
-                  <td class="py-3 px-3 font-bold text-slate-900 whitespace-nowrap">{{ formatCustomerId(cust.id) }}</td>
-                  <td class="py-3 px-4 font-semibold text-slate-800 whitespace-nowrap">{{ cust.name }}</td>
-                  <td class="py-3 px-4 text-blue-600 whitespace-nowrap font-medium">📞 {{ cust.phone }}</td>
-                  <td class="py-3 px-4 text-xs text-slate-600 max-w-[220px]">
-                    <div class="truncate font-medium text-slate-700">📍 {{ cust.address }}</div>
-                    <div class="text-[11px] text-slate-400">Lat: {{ cust.latitude }}, Lng: {{ cust.longitude }}</div>
+            <tbody>
+              @for (customer of customers(); track customer.id) {
+                <tr>
+                  <td>
+                    <button
+                      type="button"
+                      class="customer-link"
+                      (click)="focusCustomerOnMap(customer)"
+                      [attr.aria-label]="'ดูตำแหน่ง ' + customer.name"
+                    >
+                      {{ formatCustomerId(customer.id) }}
+                    </button>
                   </td>
-                  <td class="py-3 px-3 text-center whitespace-nowrap">
-                    <div class="flex items-center justify-center gap-2">
-                      <button (click)="openEditModal(cust, $event)" class="p-1 text-amber-500 hover:bg-amber-50 rounded">✏️</button>
-                      <button (click)="deleteCustomer(cust.id, $event)" class="p-1 text-rose-500 hover:bg-rose-50 rounded">🗑️</button>
+                  <td>{{ customer.name }}</td>
+                  <td>{{ customer.phone }}</td>
+                  <td class="address-cell">{{ customer.address }}</td>
+                  <td class="coordinate-cell">
+                    {{ customer.latitude }}<br />{{ customer.longitude }}
+                    @if (customer.distance_km !== undefined) {
+                      <span class="distance"
+                        >ห่างร้าน {{ customer.distance_km | number: '1.2-2' }} กม.</span
+                      >
+                    }
+                  </td>
+                  <td>
+                    <div class="row-actions">
+                      <button
+                        type="button"
+                        class="button secondary"
+                        (click)="editCustomer(customer)"
+                        [disabled]="isBusy()"
+                        [attr.aria-label]="'แก้ไขข้อมูล ' + customer.name"
+                      >
+                        ✏️ แก้ไข
+                      </button>
+                      <button
+                        type="button"
+                        class="button danger"
+                        (click)="deleteCustomer(customer)"
+                        [disabled]="isBusy()"
+                        [attr.aria-label]="'ลบข้อมูล ' + customer.name"
+                      >
+                        {{ deletingId() === customer.id ? 'กำลังลบ...' : 'ลบ' }}
+                      </button>
                     </div>
                   </td>
                 </tr>
               } @empty {
                 <tr>
-                  <td colspan="5" class="text-center py-8 text-slate-400 text-sm">ไม่พบข้อมูลลูกค้า</td>
+                  <td colspan="6" class="empty-state">
+                    {{
+                      isLoading()
+                        ? 'กำลังโหลดข้อมูลลูกค้า...'
+                        : loadError()
+                          ? 'โหลดข้อมูลไม่สำเร็จ กรุณาลองใหม่'
+                          : 'ไม่พบข้อมูลลูกค้า'
+                    }}
+                  </td>
                 </tr>
               }
             </tbody>
           </table>
         </div>
-      </div>
-
+      </section>
     </div>
-
-    @if (loadError(); as error) {
-      <div role="alert" class="bg-rose-50 border border-rose-200 text-rose-700 rounded-xl px-4 py-3 text-sm flex items-center justify-between gap-4">
-        <span>{{ error }}</span>
-        <button type="button" (click)="loadDataAsync()" [disabled]="isLoading()"
-          class="shrink-0 font-semibold underline disabled:opacity-50">
-          {{ isLoading() ? 'กำลังโหลด...' : 'ลองโหลดใหม่' }}
-        </button>
-      </div>
-    }
-  </div>
-
-  <!-- Modal Popup ตามภาพที่ 1 -->
-  @if (isModalOpen()) {
-    <div class="fixed inset-0 z-[1000] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
-      <div class="bg-white rounded-3xl shadow-2xl w-full max-w-lg p-6 border border-slate-100">
-        
-        <!-- Modal Header -->
-        <div class="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
-          <div class="flex items-center gap-2">
-            <span class="text-purple-600 text-xl font-bold">➕</span>
-            <h2 class="text-lg font-bold text-slate-800">
-              {{ isEditing() ? 'แก้ไขข้อมูลลูกค้า' : 'เพิ่มข้อมูลลูกค้าใหม่' }}
+    <dialog
+      #customerDialog
+      class="customer-dialog"
+      aria-labelledby="customer-dialog-title"
+      (cancel)="$event.preventDefault(); closeForm()"
+    >
+      @if (isFormOpen()) {
+        <section id="customer-form" class="form-panel">
+          <div class="section-heading">
+            <h2 id="customer-dialog-title">
+              {{ editingId() !== null ? 'แก้ไขข้อมูลลูกค้า' : 'เพิ่มลูกค้าใหม่' }}
             </h2>
+            <button
+              type="button"
+              class="close-dialog"
+              aria-label="ปิดฟอร์มลูกค้า"
+              (click)="closeForm()"
+              [disabled]="isSaving()"
+            >
+              ×
+            </button>
           </div>
-          <button (click)="closeModal()" class="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center text-lg font-bold">
-            &times;
-          </button>
-        </div>
-
-        <!-- Form Content -->
-        <div class="space-y-3">
-          <div class="grid grid-cols-2 gap-3">
-            <div>
-              <label class="block text-xs font-semibold text-slate-700 mb-1">ชื่อ - นามสกุล</label>
-              <input type="text" [(ngModel)]="formData.name" placeholder="ชื่อลูกค้า"
-                class="input w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-blue-500" />
-            </div>
-            <div>
-              <label class="block text-xs font-semibold text-slate-700 mb-1">เบอร์โทรศัพท์</label>
-              <input type="text" [(ngModel)]="formData.phone" placeholder="08x-xxx-xxxx"
-                class="input w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-blue-500" />
-            </div>
-          </div>
-
-          <div>
-            <label class="block text-xs font-semibold text-slate-700 mb-1">ที่อยู่จัดส่ง / หอพัก / คณะ</label>
-            <input type="text" [(ngModel)]="formData.address" placeholder="ระบุที่อยู่ หรือหอพัก"
-              class="input w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-blue-500" />
-          </div>
-
-          <!-- กล่องแผนที่ปักหมุดใน Modal ตามภาพที่ 1 -->
-          <div class="pt-1">
-            <div class="flex items-center justify-between text-xs font-semibold text-slate-700 mb-1.5">
-              <span>เลือกตำแหน่งบนแผนที่ (คลิกหรือลากหมุด)</span>
-              <span class="text-blue-600 font-mono">{{ formData.latitude }}, {{ formData.longitude }}</span>
-            </div>
-            <div id="modal-picker-map" class="modal-map-container border border-slate-200 shadow-inner"></div>
-          </div>
-
-          <div>
-            <input type="text" placeholder="จุดสังเกตเพิ่มเติม เช่น ฝากไว้ที่ป้อมยาม"
-              class="input w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-blue-500" />
-          </div>
-        </div>
-
-        <!-- Modal Footer -->
-        <div class="flex items-center justify-end gap-3 mt-5 pt-3 border-t border-slate-100">
-          <button (click)="closeModal()" class="px-5 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100 rounded-xl">
-            ยกเลิก
-          </button>
-          <button (click)="saveCustomer()" class="px-6 py-2 text-sm font-semibold bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-md">
-            บันทึกข้อมูล
-          </button>
-        </div>
-
-      </div>
-    </div>
-  }
-</div>
+          @if (editingId(); as id) {
+            <p class="hint">รหัส {{ formatCustomerId(id) }}</p>
+          }
+          <form (ngSubmit)="saveCustomer()">
+            <fieldset [disabled]="isBusy()">
+              <label for="customer-name">ชื่อ - นามสกุล</label>
+              <input
+                id="customer-name"
+                name="name"
+                [(ngModel)]="formData.name"
+                required
+                maxlength="255"
+                autofocus
+                autocomplete="name"
+                placeholder="ชื่อและนามสกุลลูกค้า"
+              />
+              <label for="customer-phone">เบอร์โทรศัพท์</label>
+              <input
+                id="customer-phone"
+                name="phone"
+                type="tel"
+                [(ngModel)]="formData.phone"
+                required
+                autocomplete="tel"
+                placeholder="เช่น 081-234-5678"
+              />
+              <label for="customer-address">ที่อยู่ / หอพัก / จุดสังเกต</label>
+              <textarea
+                id="customer-address"
+                name="address"
+                rows="3"
+                [(ngModel)]="formData.address"
+                required
+                placeholder="ระบุที่อยู่และจุดสังเกต เช่น ฝากไว้ที่ป้อมยาม"
+              ></textarea>
+              <label>เลือกตำแหน่งจัดส่ง</label>
+              <p id="picker-help" class="hint">
+                หมุดสีแดงคือตำแหน่งร้าน ลากหมุดสีส้มหรือคลิกแผนที่เพื่อเลือกบ้านลูกค้า
+              </p>
+              <div
+                #pickerMap
+                id="customer-picker-map"
+                class="picker-map"
+                role="region"
+                aria-label="แผนที่เลือกตำแหน่งจัดส่ง"
+                aria-describedby="picker-help"
+              ></div>
+              <div class="coordinates">
+                <div>
+                  <label for="customer-latitude">ละติจูด (Lat)</label>
+                  <input
+                    id="customer-latitude"
+                    name="latitude"
+                    type="number"
+                    min="-90"
+                    max="90"
+                    step="any"
+                    required
+                    [(ngModel)]="formData.latitude"
+                    (ngModelChange)="updatePicker()"
+                  />
+                </div>
+                <div>
+                  <label for="customer-longitude">ลองจิจูด (Lng)</label>
+                  <input
+                    id="customer-longitude"
+                    name="longitude"
+                    type="number"
+                    min="-180"
+                    max="180"
+                    step="any"
+                    required
+                    [(ngModel)]="formData.longitude"
+                    (ngModelChange)="updatePicker()"
+                  />
+                </div>
+              </div>
+              <p class="hint">คลิกแผนที่ ลากหมุดสีส้ม หรือกรอกพิกัดเองได้</p>
+              <div class="form-actions">
+                <button type="submit" class="button primary">
+                  {{ isSaving() ? 'กำลังบันทึก...' : 'บันทึกข้อมูล' }}
+                </button>
+                <button type="button" class="button secondary" (click)="closeForm()">ยกเลิก</button>
+              </div>
+            </fieldset>
+          </form>
+          @if (formError(); as error) {
+            <p role="alert" class="notice error">{{ error }}</p>
+          }
+        </section>
+      }
+    </dialog>
+  </div>
+</main>
