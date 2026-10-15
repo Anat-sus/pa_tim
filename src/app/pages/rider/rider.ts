@@ -106,13 +106,7 @@ export class Rider implements OnInit, AfterViewInit {
 
       let customersData: any[] = [];
       try {
-        const cs = this.customerService as any;
-        const fetchMethod = cs.getCustomers || cs.getAllCustomers || cs.getCustomersData || cs.searchCustomers;
-        
-        if (typeof fetchMethod === 'function') {
-          const res = await lastValueFrom(fetchMethod.call(cs));
-          customersData = Array.isArray(res) ? res : (res as any)?.data || [];
-        }
+        customersData = await this.customerService.getCustomers();
       } catch (e) {
         console.warn('ไม่สามารถดึงข้อมูลลูกค้าได้:', e);
       }

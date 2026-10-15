@@ -1,310 +1,457 @@
-import { Component, inject, OnInit, AfterViewInit, OnDestroy, signal, computed } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import {
+  AfterViewInit,
+  Component,
+  ChangeDetectorRef,
+  ElementRef,
+  ViewChild,
+  computed,
+  inject,
+  OnDestroy,
+  OnInit,
+  signal,
+} from '@angular/core';
+import { DecimalPipe } from '@angular/common';
 import { HttpErrorResponse } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
 import * as L from 'leaflet';
+import { environment } from '../../../environments/environment';
 import { CustomerService } from '../../services/customer.service';
 import { Customer, CreateCustomerDto } from '../../models/customer.model';
 
 @Component({
   selector: 'app-customer-management',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [DecimalPipe, FormsModule],
   templateUrl: './customer-management.html',
-  styleUrl: './customer-management.css'
+  styleUrl: './customer-management.css',
 })
 export class CustomerManagement implements OnInit, AfterViewInit, OnDestroy {
-  private customerService = inject(CustomerService);
+  private readonly customerService = inject(CustomerService);
+  private readonly changeDetector = inject(ChangeDetectorRef);
+  readonly shop = environment.shop;
+  readonly customers = signal<Customer[]>([]);
+  readonly isLoading = signal(false);
+  readonly isSaving = signal(false);
+  readonly deletingId = signal<string | number | null>(null);
+  readonly loadError = signal<string | null>(null);
+  readonly formError = signal<string | null>(null);
+  readonly feedback = signal<string | null>(null);
+  readonly editingId = signal<string | number | null>(null);
+  readonly isFormOpen = signal(false);
+  readonly appliedSearch = signal('');
+  readonly appliedRadius = signal<number | null>(null);
+  readonly isBusy = computed(
+    () => this.isLoading() || this.isSaving() || this.deletingId() !== null,
+  );
 
-  customers = signal<Customer[]>([]);
-  searchKeyword = signal<string>('');
-  isLoading = signal<boolean>(false);
-  loadError = signal<string | null>(null);
+  searchKeyword = '';
+  radiusKm: number | null = 1;
+  formData = this.emptyForm();
 
-  // ควบคุม Modal Popup
-  isModalOpen = signal<boolean>(false);
-  isEditing = signal<boolean>(false);
-  currentEditingId = signal<number | string | null>(null);
+  private map?: L.Map;
+  private resizeObserver?: ResizeObserver;
+  private readonly markersLayer = L.layerGroup();
+  private readonly markerMap = new Map<string | number, L.Marker>();
+  private pickerMap?: L.Map;
+  private pickerMarker?: L.Marker;
+  private pickerResizeObserver?: ResizeObserver;
+  @ViewChild('customerDialog', { static: true }) private dialog?: ElementRef<HTMLDialogElement>;
 
-  // โมเดลฟอร์ม
-  formData: CreateCustomerDto = {
-    name: '',
-    phone: '',
-    address: '',
-    latitude: 16.2477,
-    longitude: 103.2539
-  };
-
-  // แผนที่หลัก
-  private mainMap?: L.Map;
-  private mainMapResizeObserver?: ResizeObserver;
-  private markersLayer = L.layerGroup();
-  private markerMap = new Map<number | string, L.Marker>();
-
-  // แผนที่ใน Modal
-  private modalMap?: L.Map;
-  private modalMarker?: L.Marker;
-
-  filteredCustomers = computed(() => {
-    const kw = this.searchKeyword().toLowerCase().trim();
-    if (!kw) return this.customers();
-    return this.customers().filter(c =>
-      c.name.toLowerCase().includes(kw) ||
-      c.phone.toLowerCase().includes(kw) ||
-      c.address.toLowerCase().includes(kw) ||
-      this.formatCustomerId(c.id).toLowerCase().includes(kw)
+  @ViewChild('pickerMap')
+  set pickerMapElement(element: ElementRef<HTMLDivElement> | undefined) {
+    this.destroyPickerMap();
+    if (!element) return;
+    this.pickerMap = L.map(element.nativeElement).setView(
+      [this.formData.latitude ?? this.shop.lat, this.formData.longitude ?? this.shop.lng],
+      16,
     );
-  });
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap contributors',
+      maxZoom: 19,
+    }).addTo(this.pickerMap);
+    this.pickerMap.on('click', (event: L.LeafletMouseEvent) => {
+      if (this.isSaving()) return;
+      this.formData.latitude = Number(event.latlng.lat.toFixed(6));
+      this.formData.longitude = Number(event.latlng.lng.toFixed(6));
+      this.updatePicker(false);
+      this.changeDetector.markForCheck();
+    });
+    this.addShopMarker(this.pickerMap);
+    this.updatePicker(false);
+    this.pickerMap.fitBounds(
+      [
+        [this.shop.lat, this.shop.lng],
+        [this.formData.latitude ?? this.shop.lat, this.formData.longitude ?? this.shop.lng],
+      ],
+      { padding: [45, 45], maxZoom: 16 },
+    );
+    this.pickerResizeObserver = new ResizeObserver(() =>
+      this.pickerMap?.invalidateSize({ pan: false }),
+    );
+    this.pickerResizeObserver.observe(element.nativeElement);
+    document.getElementById('customer-name')?.focus();
+  }
+  private radiusCircle?: L.Circle;
+  private requestId = 0;
 
   ngOnInit(): void {
-    this.loadDataAsync();
+    void this.loadDataAsync();
   }
 
   ngAfterViewInit(): void {
-    this.initMainMap();
+    const point: L.LatLngTuple = [this.shop.lat, this.shop.lng];
+    this.map = L.map('main-customer-map').setView(point, 14);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap contributors',
+      maxZoom: 19,
+    }).addTo(this.map);
+    this.markersLayer.addTo(this.map);
+    this.addShopMarker(this.map);
+    const element = document.getElementById('main-customer-map')!;
+    this.resizeObserver = new ResizeObserver(() => this.map?.invalidateSize({ pan: false }));
+    this.resizeObserver.observe(element);
+    this.renderCustomerMarkers();
+    this.renderRadius();
   }
 
   ngOnDestroy(): void {
-    this.mainMapResizeObserver?.disconnect();
-    this.mainMap?.remove();
-    this.modalMap?.remove();
+    this.requestId++;
+    this.destroyPickerMap();
+    this.resizeObserver?.disconnect();
+    this.map?.remove();
+    this.map = undefined;
   }
 
   formatCustomerId(id: number | string): string {
-    const num = Number(id);
-    if (!isNaN(num)) {
-      return `CUST-${String(num).padStart(2, '0')}`;
-    }
-    return String(id);
+    return /^\d+$/.test(String(id)) ? `CUST-${String(id).padStart(3, '0')}` : String(id);
   }
 
-  async loadDataAsync(): Promise<void> {
+  async onSearch(): Promise<void> {
+    this.appliedSearch.set(this.searchKeyword.trim());
+    await this.loadDataAsync();
+  }
+
+  async onFilterNearby(): Promise<void> {
+    const km = Number(this.radiusKm);
+    if (!Number.isFinite(km) || km <= 0 || km > 3) {
+      this.loadError.set('กรุณาระบุรัศมีมากกว่า 0 และไม่เกิน 3 กิโลเมตร');
+      return;
+    }
+    this.appliedRadius.set(km);
+    await this.loadDataAsync();
+  }
+
+  async resetFilters(): Promise<void> {
+    this.searchKeyword = '';
+    this.radiusKm = 1;
+    this.appliedSearch.set('');
+    this.appliedRadius.set(null);
+    await this.loadDataAsync();
+  }
+
+  async loadDataAsync(): Promise<boolean> {
+    const request = ++this.requestId;
+    this.isLoading.set(true);
+    this.loadError.set(null);
     try {
-      this.isLoading.set(true);
-      this.loadError.set(null);
-      const data = await this.customerService.getCustomers();
+      const keyword = this.appliedSearch();
+      const km = this.appliedRadius();
+      let data: Customer[];
+      if (keyword && km !== null) {
+        const [matching, nearby] = await Promise.all([
+          this.customerService.searchCustomers(keyword),
+          this.customerService.getNearbyCustomers(km),
+        ]);
+        const matchingIds = new Set(matching.map((customer) => String(customer.id)));
+        data = nearby.filter((customer) => matchingIds.has(String(customer.id)));
+      } else if (km !== null) {
+        data = await this.customerService.getNearbyCustomers(km);
+      } else if (keyword) {
+        data = await this.customerService.searchCustomers(keyword);
+      } else {
+        data = await this.customerService.getCustomers();
+      }
+      if (request !== this.requestId) return false;
       this.customers.set(data);
       this.renderCustomerMarkers();
+      this.renderRadius();
+      return true;
     } catch (error: unknown) {
-      console.error('[loadDataAsync] ไม่สามารถดึงข้อมูลจาก Backend:', error);
-      this.loadError.set(this.getRequestErrorMessage(error));
+      if (request === this.requestId) {
+        this.loadError.set(this.getRequestErrorMessage(error));
+        // ไม่แสดงผลชุดเก่าเป็นผลของตัวกรองใหม่เมื่อโหลดไม่สำเร็จ
+        this.customers.set([]);
+        this.renderCustomerMarkers();
+        this.radiusCircle?.remove();
+        this.radiusCircle = undefined;
+      }
+      return false;
     } finally {
-      this.isLoading.set(false);
+      if (request === this.requestId) this.isLoading.set(false);
     }
   }
 
-  private getRequestErrorMessage(error: unknown): string {
-    if (error instanceof HttpErrorResponse) {
-      if (error.status === 0) {
-        return 'เชื่อมต่อ API ไม่สำเร็จ (เครือข่ายหรือ CORS) กรุณาตรวจสอบการตั้งค่า Backend';
-      }
-      return `Backend ตอบกลับข้อผิดพลาด HTTP ${error.status}: ${error.message}`;
-    }
-
-    return error instanceof Error ? error.message : 'เกิดข้อผิดพลาดที่ไม่ทราบสาเหตุ';
+  openAddForm(): void {
+    if (this.isBusy()) return;
+    this.resetForm();
+    this.feedback.set(null);
+    this.isFormOpen.set(true);
+    this.dialog?.nativeElement.showModal();
   }
 
-  private initMainMap(): void {
-    const shopLat = 16.246839;
-    const shopLng = 103.251963;
-    const mapElement = document.getElementById('main-customer-map');
-
-    if (!mapElement) {
-      throw new Error('ไม่พบพื้นที่แสดงแผนที่ลูกค้า');
-    }
-
-    this.mainMap = L.map(mapElement).setView([shopLat, shopLng], 14);
-    this.mainMapResizeObserver = new ResizeObserver(() => {
-      this.mainMap?.invalidateSize({ pan: false });
-    });
-    this.mainMapResizeObserver.observe(mapElement);
-
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '&copy; OpenStreetMap contributors',
-      maxZoom: 19
-    }).addTo(this.mainMap);
-
-    this.markersLayer.addTo(this.mainMap);
-
-    const shopIcon = L.divIcon({
-      className: 'custom-shop-icon',
-      html: `
-        <div class="bg-amber-600 text-white text-xs font-bold px-2 py-1 rounded shadow-md border border-white flex items-center gap-1 whitespace-nowrap">
-          🍱 ครัวกลาง (มมส ขามเรียง)
-        </div>
-      `,
-      iconSize: [160, 30],
-      iconAnchor: [80, 15]
-    });
-
-    L.marker([shopLat, shopLng], { icon: shopIcon })
-      .bindPopup('<b>ร้านป้าติ๋ม ข้าวกล่องเดลิเวอรี</b><br>คณะวิทยาการสารสนเทศ มมส.')
-      .addTo(this.mainMap);
-
-    this.renderCustomerMarkers();
-    requestAnimationFrame(() => this.mainMap?.invalidateSize({ pan: false }));
+  closeForm(): void {
+    if (this.isSaving()) return;
+    this.dismissForm();
   }
 
-  private renderCustomerMarkers(): void {
-    if (!this.mainMap) return;
-    this.markersLayer.clearLayers();
-    this.markerMap.clear();
-
-    const customerIcon = L.divIcon({
-      className: 'custom-customer-icon',
-      html: `
-        <div class="bg-blue-600 hover:bg-blue-700 text-white rounded-full w-7 h-7 flex items-center justify-center shadow-lg border-2 border-white cursor-pointer">
-          <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5 fill-current" viewBox="0 0 20 20">
-            <path fill-rule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clip-rule="evenodd" />
-          </svg>
-        </div>
-      `,
-      iconSize: [28, 28],
-      iconAnchor: [14, 14]
-    });
-
-    this.customers().forEach(c => {
-      const lat = Number(c.latitude);
-      const lng = Number(c.longitude);
-      if (!isNaN(lat) && !isNaN(lng)) {
-        const marker = L.marker([lat, lng], { icon: customerIcon })
-          .bindPopup(`
-            <div class="p-1">
-              <strong class="text-blue-700 font-bold">${this.formatCustomerId(c.id)}: ${c.name}</strong><br>
-              <span class="text-gray-600 text-xs">📞 ${c.phone}</span><br>
-              <span class="text-gray-500 text-xs">📍 ${c.address}</span>
-            </div>
-          `);
-        marker.addTo(this.markersLayer);
-        this.markerMap.set(c.id, marker);
-      }
-    });
+  private dismissForm(): void {
+    this.dialog?.nativeElement.close();
+    this.isFormOpen.set(false);
+    this.destroyPickerMap();
+    this.resetForm();
   }
 
-  private initModalMap(): void {
-    setTimeout(() => {
-      const lat = Number(this.formData.latitude) || 16.2477;
-      const lng = Number(this.formData.longitude) || 103.2539;
-
-      if (this.modalMap) {
-        this.modalMap.remove();
-      }
-
-      this.modalMap = L.map('modal-picker-map').setView([lat, lng], 15);
-
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '&copy; OpenStreetMap',
-        maxZoom: 19
-      }).addTo(this.modalMap);
-
-      this.modalMarker = L.marker([lat, lng], { draggable: true }).addTo(this.modalMap);
-
-      this.modalMarker.on('dragend', () => {
-        const pos = this.modalMarker!.getLatLng();
-        this.formData.latitude = parseFloat(pos.lat.toFixed(6));
-        this.formData.longitude = parseFloat(pos.lng.toFixed(6));
-      });
-
-      this.modalMap.on('click', (e: L.LeafletMouseEvent) => {
-        const clickedLat = parseFloat(e.latlng.lat.toFixed(6));
-        const clickedLng = parseFloat(e.latlng.lng.toFixed(6));
-        this.formData.latitude = clickedLat;
-        this.formData.longitude = clickedLng;
-        this.modalMarker?.setLatLng([clickedLat, clickedLng]);
-      });
-
-      this.modalMap.invalidateSize();
-    }, 200);
+  private destroyPickerMap(): void {
+    this.pickerResizeObserver?.disconnect();
+    this.pickerResizeObserver = undefined;
+    this.pickerMap?.remove();
+    this.pickerMap = undefined;
+    this.pickerMarker = undefined;
   }
 
-  focusCustomerOnMap(customer: Customer): void {
-    if (this.mainMap && customer.latitude && customer.longitude) {
-      this.mainMap.flyTo([Number(customer.latitude), Number(customer.longitude)], 16);
-      const marker = this.markerMap.get(customer.id);
-      if (marker) {
-        setTimeout(() => marker.openPopup(), 600);
-      }
-    }
+  resetForm(): void {
+    this.editingId.set(null);
+    this.formData = this.emptyForm();
+    this.formError.set(null);
+    this.pickerMarker?.remove();
+    this.pickerMarker = undefined;
+    if (this.isFormOpen()) this.updatePicker();
   }
 
-  openAddModal(): void {
-    this.isEditing.set(false);
-    this.currentEditingId.set(null);
-    this.formData = {
-      name: '',
-      phone: '',
-      address: '',
-      latitude: 16.2477,
-      longitude: 103.2539
-    };
-    this.isModalOpen.set(true);
-    this.initModalMap();
-  }
-
-  openEditModal(customer: Customer, event?: Event): void {
-    event?.stopPropagation();
-    this.isEditing.set(true);
-    this.currentEditingId.set(customer.id);
+  editCustomer(customer: Customer): void {
+    this.editingId.set(customer.id);
+    this.formError.set(null);
+    this.feedback.set(null);
     this.formData = {
       name: customer.name,
       phone: customer.phone,
       address: customer.address,
       latitude: Number(customer.latitude),
-      longitude: Number(customer.longitude)
+      longitude: Number(customer.longitude),
     };
-    this.isModalOpen.set(true);
-    this.initModalMap();
+    this.isFormOpen.set(true);
+    this.dialog?.nativeElement.showModal();
   }
 
-  closeModal(): void {
-    this.isModalOpen.set(false);
-    if (this.modalMap) {
-      this.modalMap.remove();
-      this.modalMap = undefined;
+  updatePicker(panToMarker = true): void {
+    if (!this.pickerMap) return;
+    const lat = this.formData.latitude;
+    const lng = this.formData.longitude;
+    if (
+      lat === null ||
+      lng === null ||
+      !Number.isFinite(lat) ||
+      !Number.isFinite(lng) ||
+      lat < -90 ||
+      lat > 90 ||
+      lng < -180 ||
+      lng > 180
+    )
+      return;
+    if (this.pickerMarker) {
+      this.pickerMarker.setLatLng([lat, lng]);
+    } else {
+      this.pickerMarker = L.marker([lat, lng], {
+        draggable: true,
+        zIndexOffset: 1000,
+        title: 'ลากหมุดเพื่อเลือกตำแหน่งลูกค้า',
+        icon: L.divIcon({
+          className: 'customer-picker-pin',
+          html: '<svg width="36" height="46" viewBox="0 0 36 46" aria-hidden="true"><path d="M18 44C15 39 2 26 2 18a16 16 0 1 1 32 0c0 8-13 21-16 26Z" fill="#ea580c" stroke="white" stroke-width="3"/><circle cx="18" cy="18" r="6" fill="white"/></svg>',
+          iconSize: [36, 46],
+          iconAnchor: [18, 44],
+        }),
+      }).addTo(this.pickerMap);
+      this.pickerMarker.on('dragend', () => {
+        if (this.isSaving()) {
+          this.updatePicker();
+          return;
+        }
+        const position = this.pickerMarker!.getLatLng();
+        this.formData.latitude = Number(position.lat.toFixed(6));
+        this.formData.longitude = Number(position.lng.toFixed(6));
+        this.changeDetector.markForCheck();
+      });
     }
+    if (panToMarker && !this.pickerMap.getBounds().contains([lat, lng])) {
+      this.pickerMap.panTo([lat, lng]);
+    }
+  }
+
+  focusCustomerOnMap(customer: Customer): void {
+    this.map?.flyTo([Number(customer.latitude), Number(customer.longitude)], 16);
+    this.markerMap.get(customer.id)?.openPopup();
   }
 
   async saveCustomer(): Promise<void> {
-    if (!this.formData.name.trim() || !this.formData.phone.trim() || !this.formData.address.trim()) {
-      alert('กรุณากรอกข้อมูลให้ครบถ้วนทุกช่อง');
+    if (this.isBusy()) return;
+    this.formError.set(null);
+    this.feedback.set(null);
+    if (
+      !this.formData.name.trim() ||
+      !this.formData.phone.trim() ||
+      !this.formData.address.trim()
+    ) {
+      this.formError.set('กรุณากรอกชื่อ เบอร์โทร และที่อยู่ / จุดสังเกตให้ครบถ้วน');
       return;
     }
-
+    const { latitude, longitude } = this.formData;
+    if (
+      latitude === null ||
+      longitude === null ||
+      !Number.isFinite(latitude) ||
+      !Number.isFinite(longitude) ||
+      latitude < -90 ||
+      latitude > 90 ||
+      longitude < -180 ||
+      longitude > 180
+    ) {
+      this.formError.set('กรุณาระบุพิกัดละติจูดและลองจิจูดที่ถูกต้อง');
+      return;
+    }
+    if (L.latLng(this.shop.lat, this.shop.lng).distanceTo([latitude, longitude]) > 3000) {
+      this.formError.set(
+        'ตำแหน่งลูกค้าอยู่นอกพื้นที่จัดส่ง กรุณาเลือกพิกัดภายในรัศมี 3 กิโลเมตรจากร้าน',
+      );
+      return;
+    }
+    this.isSaving.set(true);
     try {
-      if (this.isEditing() && this.currentEditingId() !== null) {
-        const res = await this.customerService.updateCustomer(this.currentEditingId()!, this.formData);
-        console.log('[saveCustomer] Update Response:', res);
-      } else {
-        const res = await this.customerService.createCustomer(this.formData);
-        console.log('[saveCustomer] Create Response:', res);
-      }
-
-      this.closeModal();
-      // เรียกโหลดข้อมูลใหม่จาก Server ทันที
-      await this.loadDataAsync();
-      alert('บันทึกข้อมูลเรียบร้อยแล้ว!');
+      const dto: CreateCustomerDto = { ...this.formData, latitude, longitude };
+      const id = this.editingId();
+      if (id !== null) await this.customerService.updateCustomer(id, dto);
+      else await this.customerService.createCustomer(dto);
+      this.dismissForm();
+      const refreshed = await this.loadDataAsync();
+      this.feedback.set(
+        refreshed
+          ? 'บันทึกข้อมูลลูกค้าเรียบร้อยแล้ว'
+          : 'บันทึกข้อมูลแล้ว แต่โหลดรายชื่อใหม่ไม่สำเร็จ กรุณากดลองโหลดใหม่',
+      );
     } catch (error: unknown) {
-      console.error('[saveCustomer] เกิดข้อผิดพลาดในการบันทึก:', error);
-      alert(`บันทึกข้อมูลไม่สำเร็จ: ${this.getRequestErrorMessage(error)}`);
+      this.formError.set(this.getRequestErrorMessage(error));
+    } finally {
+      this.isSaving.set(false);
     }
   }
 
-  async deleteCustomer(id: number | string, event?: Event): Promise<void> {
-    event?.stopPropagation();
-    if (confirm(`คุณต้องการลบข้อมูลลูกค้ารหัส ${this.formatCustomerId(id)} ใช่หรือไม่?`)) {
-      try {
-        await this.customerService.deleteCustomer(id);
-        await this.loadDataAsync();
-        alert('ลบข้อมูลเรียบร้อยแล้ว');
-      } catch (error: unknown) {
-        console.error('[deleteCustomer] ลบไม่สำเร็จ:', error);
-        alert(`ลบข้อมูลไม่สำเร็จ: ${this.getRequestErrorMessage(error)}`);
+  async deleteCustomer(customer: Customer): Promise<void> {
+    if (
+      this.isBusy() ||
+      !confirm(`ยืนยันลบ ${this.formatCustomerId(customer.id)}: ${customer.name}?`)
+    )
+      return;
+    this.deletingId.set(customer.id);
+    this.feedback.set(null);
+    try {
+      await this.customerService.deleteCustomer(customer.id);
+      if (this.editingId() === customer.id) this.resetForm();
+      const refreshed = await this.loadDataAsync();
+      this.feedback.set(
+        refreshed ? 'ลบข้อมูลลูกค้าเรียบร้อยแล้ว' : 'ลบข้อมูลแล้ว แต่โหลดรายชื่อใหม่ไม่สำเร็จ',
+      );
+    } catch (error: unknown) {
+      this.feedback.set(null);
+      this.loadError.set(this.getRequestErrorMessage(error, true));
+    } finally {
+      this.deletingId.set(null);
+    }
+  }
+
+  private emptyForm(): Omit<CreateCustomerDto, 'latitude' | 'longitude'> & {
+    latitude: number | null;
+    longitude: number | null;
+  } {
+    return {
+      name: '',
+      phone: '',
+      address: '',
+      latitude: environment.shop.lat,
+      longitude: environment.shop.lng,
+    };
+  }
+
+  private addShopMarker(map: L.Map): void {
+    L.marker([this.shop.lat, this.shop.lng], {
+      title: this.shop.name,
+      icon: L.divIcon({
+        className: 'customer-shop-pin',
+        html: '<span>🍱 ร้านป้าติ๋ม</span>',
+        iconSize: [124, 32],
+        // วางป้ายข้างจุดร้าน เพื่อให้เห็นทั้งร้านและหมุดบ้านเมื่อพิกัดตรงกัน
+        iconAnchor: [-12, 16],
+      }),
+    })
+      .bindPopup('ร้านป้าติ๋ม · คณะวิทยาการสารสนเทศ มมส.')
+      .addTo(map);
+  }
+
+  private renderCustomerMarkers(): void {
+    if (!this.map) return;
+    this.markersLayer.clearLayers();
+    this.markerMap.clear();
+    const icon = L.divIcon({
+      className: 'customer-home-pin',
+      html: '<span>⌂</span>',
+      iconSize: [30, 30],
+      iconAnchor: [15, 15],
+    });
+    for (const customer of this.customers()) {
+      // ใช้ textContent เพื่อไม่ให้ชื่อหรือที่อยู่ถูกตีความเป็น HTML ใน Leaflet popup
+      const popup = document.createElement('div');
+      const title = document.createElement('strong');
+      title.textContent = `${this.formatCustomerId(customer.id)}: ${customer.name}`;
+      const phone = document.createElement('div');
+      phone.textContent = `โทร: ${customer.phone}`;
+      const address = document.createElement('div');
+      address.textContent = customer.address;
+      popup.append(title, phone, address);
+      const marker = L.marker([Number(customer.latitude), Number(customer.longitude)], { icon })
+        .bindPopup(popup)
+        .addTo(this.markersLayer);
+      this.markerMap.set(customer.id, marker);
+    }
+  }
+
+  private renderRadius(): void {
+    this.radiusCircle?.remove();
+    this.radiusCircle = undefined;
+    const km = this.appliedRadius();
+    if (!this.map || km === null) return;
+    this.radiusCircle = L.circle([this.shop.lat, this.shop.lng], {
+      radius: km * 1000,
+      color: '#2563eb',
+      fillColor: '#3b82f6',
+      fillOpacity: 0.12,
+    }).addTo(this.map);
+    this.map.fitBounds(this.radiusCircle.getBounds());
+  }
+
+  private getRequestErrorMessage(error: unknown, deleting = false): string {
+    if (error instanceof HttpErrorResponse) {
+      if (error.status === 0) return 'เชื่อมต่อเซิร์ฟเวอร์ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง';
+      const body = error.error;
+      const message =
+        typeof body?.error === 'string'
+          ? body.error
+          : typeof body?.message === 'string'
+            ? body.message
+            : '';
+      if (deleting && (error.status === 409 || /foreign key|constraint|ออเดอร์/i.test(message))) {
+        return 'ไม่สามารถลบลูกค้าที่มีออเดอร์อ้างอิงอยู่ได้ กรุณาจัดการออเดอร์ที่เกี่ยวข้องก่อน';
       }
+      return message || `ดำเนินการไม่สำเร็จ (HTTP ${error.status}) กรุณาลองใหม่อีกครั้ง`;
     }
-  }
-
-  onSearchInput(event: Event): void {
-    const input = event.target as HTMLInputElement;
-    this.searchKeyword.set(input.value);
+    return error instanceof Error ? error.message : 'เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง';
   }
 }

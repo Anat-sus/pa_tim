@@ -21,14 +21,6 @@ body {
   border-radius: 0.75rem;
 }
 
-/* แผนที่ขนาดกะทัดรัดสำหรับใน Modal Popup */
-.modal-map-container {
-  width: 100%;
-  height: 220px;
-  border-radius: 0.75rem;
-  z-index: 1;
-}
-
 /* Custom Marker Styling for Leaflet (สำหรับหน้า Order Management) */
 .leaflet-order-marker {
   display: flex !important;
