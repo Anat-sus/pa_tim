@@ -1,5 +1,6 @@
-import { Component } from '@angular/core';
-import { RouterLink, RouterLinkActive } from '@angular/router';
+import { Component, inject } from '@angular/core';
+import { Router, RouterLink, RouterLinkActive, NavigationEnd } from '@angular/router';
+import { filter } from 'rxjs/operators';
 
 @Component({
   imports: [RouterLink, RouterLinkActive],
@@ -7,6 +8,10 @@ import { RouterLink, RouterLinkActive } from '@angular/router';
   templateUrl: './header.html',
 })
 export class Header {
+  private router = inject(Router);
+
+  isRiderMode = false;
+
   protected readonly navigationItems = [
     {
       label: 'ลูกค้า',
@@ -24,4 +29,12 @@ export class Header {
       route: '/route-dashboard',
     },
   ];
+
+  constructor() {
+    this.router.events.pipe(
+      filter((event): event is NavigationEnd => event instanceof NavigationEnd)
+    ).subscribe((event: NavigationEnd) => {
+      this.isRiderMode = event.urlAfterRedirects.includes('/rider');
+    });
+  }
 }
