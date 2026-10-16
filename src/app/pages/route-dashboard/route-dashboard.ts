@@ -184,18 +184,22 @@ export class RouteDashboard implements OnInit, AfterViewChecked, OnDestroy {
     if (!this.map || !this.dashboard) return;
     const shop = this.dashboard.shop;
     const shopPoint: L.LatLngExpression = [Number(shop.latitude), Number(shop.longitude)];
+    //เลือกเสน้ทางที่เลือกไว้ ถ้าไม่มีให้ใช้เส้นทางทั้งหมด
     const routes = this.selectedRoute ? [this.selectedRoute] : this.dashboard.routes;
     this.renderRouteLayers(routes, shopPoint, shop.name);
+    //โหลด geometry ของเส้นทางที่ยังไม่มีในแผนที่
     const routesToLoad = routes.filter((route) => !this.roadGeometries.has(route.job_code));
     if (routesToLoad.length === 0) return;
 
     this.isLoadingRoadGeometry = true;
+    //ดึงเส้นทาง
     await Promise.all(routesToLoad.map((route) => this.loadRoadGeometry(route, Number(shop.latitude), Number(shop.longitude))));
     this.isLoadingRoadGeometry = false;
     if (!this.map || !this.dashboard) return;
     this.renderRouteLayers(routes, shopPoint, shop.name);
   }
 
+  // แสดงเส้นทางและจุดหยุดบนแผนที่
   private renderRouteLayers(
     routes: DeliveryRoute[],
     shopPoint: L.LatLngExpression,
@@ -204,6 +208,7 @@ export class RouteDashboard implements OnInit, AfterViewChecked, OnDestroy {
     if (!this.map) return;
     this.mapLayer.clearLayers();
     const bounds = L.latLngBounds([]);
+    // แสดงจุดร้านค้า
     L.marker(shopPoint, {
       icon: L.divIcon({ className: 'shop-marker', html: '🍱', iconSize: [34, 34], iconAnchor: [17, 17] }),
     }).bindPopup(`<strong>${shopName}</strong>`).addTo(this.mapLayer);
@@ -214,7 +219,9 @@ export class RouteDashboard implements OnInit, AfterViewChecked, OnDestroy {
         shopPoint,
         ...route.stops.map((stop) => [Number(stop.latitude), Number(stop.longitude)] as L.LatLngExpression),
       ];
+
       const points = this.roadGeometries.get(route.job_code) || fallbackPoints;
+      // แสดงจุดหยุดและเส้นทาง
       route.stops.forEach((stop, index) => {
         const point: L.LatLngExpression = [Number(stop.latitude), Number(stop.longitude)];
         bounds.extend(point);
@@ -228,6 +235,7 @@ export class RouteDashboard implements OnInit, AfterViewChecked, OnDestroy {
         }).bindPopup(`<strong>${this.stopName(stop)}</strong><br>${stop.address || ''}<br>${stop.boxes} กล่อง`)
           .addTo(this.mapLayer);
       });
+      // แสดงเส้นทางระหว่างจุดหยุด
       if (points.length > 1) {
         L.polyline(points, { color: this.routeColor(route), weight: 5, opacity: 0.8 }).addTo(this.mapLayer);
       }
