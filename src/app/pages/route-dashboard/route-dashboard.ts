@@ -1,4 +1,4 @@
-import { AfterViewChecked, Component, OnDestroy, OnInit, ElementRef, ViewChild, inject } from '@angular/core';
+import { AfterViewChecked, ChangeDetectorRef, Component, OnDestroy, OnInit, ElementRef, ViewChild, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { lastValueFrom } from 'rxjs';
 import * as L from 'leaflet';
@@ -17,6 +17,9 @@ export class RouteDashboard implements OnInit, AfterViewChecked, OnDestroy {
   private readonly savedDashboardKey = 'pa-tim:last-route-dashboard';
   private readonly routeService = inject(DeliveryRouteService);
   private readonly orderService = inject(OrderService);
+  private readonly changeDetector = inject(ChangeDetectorRef);
+  private viewDestroyed = false;
+  private refreshQueued = false;
   private map?: L.Map;
   private readonly mapLayer = L.layerGroup();
   private readonly roadGeometries = new Map<string | number, L.LatLngExpression[]>();
@@ -46,12 +49,16 @@ export class RouteDashboard implements OnInit, AfterViewChecked, OnDestroy {
   }
 
   ngOnDestroy(): void {
+    this.viewDestroyed = true;
     this.map?.remove();
   }
 
   async calculateRoutes(): Promise<void> {
+    if (this.isCalculating) return;
+
     this.isCalculating = true;
     this.errorMessage = '';
+    this.refreshView();
     try {
       this.dashboard = await lastValueFrom(this.routeService.optimize());
       this.selectedRoute = undefined;
@@ -66,6 +73,7 @@ export class RouteDashboard implements OnInit, AfterViewChecked, OnDestroy {
       this.errorMessage = 'คำนวณเส้นทางไม่สำเร็จหรือใช้เวลานานเกิน 45 วินาที กรุณาลองใหม่อีกครั้ง';
     } finally {
       this.isCalculating = false;
+      this.refreshView();
     }
   }
 
@@ -109,6 +117,7 @@ export class RouteDashboard implements OnInit, AfterViewChecked, OnDestroy {
       this.isLoading = false;
       this.initializeMap();
       void this.drawRoutes();
+      this.refreshView();
     }
   }
 
@@ -163,6 +172,7 @@ export class RouteDashboard implements OnInit, AfterViewChecked, OnDestroy {
       this.databaseErrorMessage = 'โหลดจำนวนออเดอร์จากฐานข้อมูลไม่สำเร็จ กรุณาลองโหลดหน้าใหม่';
     } finally {
       this.databaseSummaryLoading = false;
+      this.refreshView();
     }
   }
 
@@ -192,11 +202,32 @@ export class RouteDashboard implements OnInit, AfterViewChecked, OnDestroy {
     if (routesToLoad.length === 0) return;
 
     this.isLoadingRoadGeometry = true;
+    this.refreshView();
     //ดึงเส้นทาง
     await Promise.all(routesToLoad.map((route) => this.loadRoadGeometry(route, Number(shop.latitude), Number(shop.longitude))));
     this.isLoadingRoadGeometry = false;
-    if (!this.map || !this.dashboard) return;
+    if (!this.map || !this.dashboard) {
+      this.refreshView();
+      return;
+    }
     this.renderRouteLayers(routes, shopPoint, shop.name);
+    this.refreshView();
+  }
+
+  // แอปนี้ไม่มี Zone.js งานที่อยู่หลัง await จึงต้องสั่งวาดหน้าเอง
+  // เลื่อนออกจากรอบ change detection ปัจจุบัน เพื่อไม่ให้ชนกับ AfterViewChecked
+  private refreshView(): void {
+    if (this.viewDestroyed || this.refreshQueued) return;
+    this.refreshQueued = true;
+    queueMicrotask(() => {
+      this.refreshQueued = false;
+      if (this.viewDestroyed) return;
+      try {
+        this.changeDetector.detectChanges();
+      } catch (error) {
+        console.error('วาดแผนที่ใหม่ไม่สำเร็จ:', error);
+      }
+    });
   }
 
   // แสดงเส้นทางและจุดหยุดบนแผนที่
@@ -208,11 +239,8 @@ export class RouteDashboard implements OnInit, AfterViewChecked, OnDestroy {
     if (!this.map) return;
     this.mapLayer.clearLayers();
     const bounds = L.latLngBounds([]);
-    // แสดงจุดร้านค้า
-    L.marker(shopPoint, {
-      icon: L.divIcon({ className: 'shop-marker', html: '🍱', iconSize: [34, 34], iconAnchor: [17, 17] }),
-    }).bindPopup(`<strong>${shopName}</strong>`).addTo(this.mapLayer);
-    bounds.extend(shopPoint);
+    const shopLatLng = L.latLng(shopPoint);
+    bounds.extend(shopLatLng);
 
     for (const route of routes) {
       const fallbackPoints: L.LatLngExpression[] = [
@@ -237,9 +265,23 @@ export class RouteDashboard implements OnInit, AfterViewChecked, OnDestroy {
       });
       // แสดงเส้นทางระหว่างจุดหยุด
       if (points.length > 1) {
-        L.polyline(points, { color: this.routeColor(route), weight: 5, opacity: 0.8 }).addTo(this.mapLayer);
+        L.polyline(points, { color: this.routeColor(route), weight: 5, opacity: 0.85 }).addTo(this.mapLayer);
       }
     }
+
+    const shopSharesStop = routes.some((route) =>
+      route.stops.some((stop) => shopLatLng.distanceTo([Number(stop.latitude), Number(stop.longitude)]) < 25),
+    );
+    // วาดร้านทีหลังและยกให้สูงกว่าหมุดจุดส่ง แม้พิกัดจะซ้อนกันก็ยังเห็นทั้งสองอัน
+    L.marker(shopLatLng, {
+      zIndexOffset: 1000,
+      icon: L.divIcon({
+        className: shopSharesStop ? 'shop-marker is-stacked' : 'shop-marker',
+        html: shopSharesStop ? '<span class="shop-badge">🍱</span><span class="shop-stem"></span>' : '<span class="shop-badge">🍱</span>',
+        iconSize: shopSharesStop ? [36, 62] : [36, 36],
+        iconAnchor: shopSharesStop ? [18, 62] : [18, 18],
+      }),
+    }).bindPopup(`<strong>${shopName}</strong><br>จุดเริ่มต้นจัดส่ง`).addTo(this.mapLayer);
     if (bounds.isValid()) this.map.fitBounds(bounds.pad(0.12));
     this.map.invalidateSize();
   }
@@ -258,12 +300,52 @@ export class RouteDashboard implements OnInit, AfterViewChecked, OnDestroy {
       const response = await lastValueFrom(this.routeService.getRoadGeometry(points));
       const geometry = response.routes[0]?.geometry.coordinates;
       if (response.code === 'Ok' && geometry?.length) {
-        this.roadGeometries.set(route.job_code, geometry.map(([longitude, latitude]) => [latitude, longitude]));
+        this.roadGeometries.set(route.job_code, this.attachAnchors(geometry, response.waypoints, points));
       } else {
         this.roadGeometries.set(route.job_code, fallback);
       }
     } catch {
       this.roadGeometries.set(route.job_code, fallback);
     }
+  }
+
+  // เส้นจาก OSRM อยู่บนถนน จึงต่อปลายเส้นเข้าพิกัดร้านและจุดส่งจริง
+  private attachAnchors(
+    geometry: Array<[number, number]>,
+    waypoints: Array<{ location: [number, number] }> | undefined,
+    anchors: Array<{ latitude: number | string; longitude: number | string }>,
+  ): L.LatLngExpression[] {
+    const road = geometry.map(([longitude, latitude]) => L.latLng(latitude, longitude));
+    const exact = anchors.map((anchor) => L.latLng(Number(anchor.latitude), Number(anchor.longitude)));
+    const snapped = waypoints?.length === exact.length
+      ? waypoints.map((waypoint) => L.latLng(waypoint.location[1], waypoint.location[0]))
+      : exact;
+    const connected: L.LatLng[] = [];
+    let cursor = 0;
+
+    exact.forEach((anchor, index) => {
+      const target = snapped[index];
+      let bestIndex = cursor;
+      let bestDistance = Number.POSITIVE_INFINITY;
+      for (let pointIndex = cursor; pointIndex < road.length; pointIndex++) {
+        const distance = road[pointIndex].distanceTo(target);
+        if (distance < bestDistance) {
+          bestDistance = distance;
+          bestIndex = pointIndex;
+        }
+        if (bestDistance < 25 && distance > bestDistance + 40) break;
+      }
+
+      connected.push(...road.slice(cursor, bestIndex + 1));
+      const roadPoint = road[bestIndex];
+      const previous = connected[connected.length - 1];
+      if (roadPoint.distanceTo(anchor) > 2 && (!previous || previous.distanceTo(anchor) > 2)) {
+        connected.push(anchor, roadPoint);
+      }
+      cursor = bestIndex;
+    });
+
+    connected.push(...road.slice(cursor));
+    return connected;
   }
 }

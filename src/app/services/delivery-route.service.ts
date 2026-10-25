@@ -57,6 +57,9 @@ export class DeliveryRouteService {
 
 export interface OsrmRouteResponse {
   code: string;
+  waypoints?: Array<{
+    location: [number, number];
+  }>;
   routes: Array<{
     geometry: {
       coordinates: Array<[number, number]>;
