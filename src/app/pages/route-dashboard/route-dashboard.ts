@@ -1,5 +1,6 @@
 import { AfterViewChecked, ChangeDetectorRef, Component, OnDestroy, OnInit, ElementRef, ViewChild, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { ActivatedRoute, Router } from '@angular/router';
 import { lastValueFrom } from 'rxjs';
 import * as L from 'leaflet';
 import { DeliveryRouteService } from '../../services/delivery-route.service';
@@ -18,6 +19,8 @@ export class RouteDashboard implements OnInit, AfterViewChecked, OnDestroy {
   private readonly routeService = inject(DeliveryRouteService);
   private readonly orderService = inject(OrderService);
   private readonly changeDetector = inject(ChangeDetectorRef);
+  private readonly router = inject(Router);
+  private readonly activatedRoute = inject(ActivatedRoute);
   private viewDestroyed = false;
   private refreshQueued = false;
   private map?: L.Map;
@@ -98,6 +101,7 @@ export class RouteDashboard implements OnInit, AfterViewChecked, OnDestroy {
     const restored = this.restoreSavedDashboard();
     this.applyDashboardOrderSummary();
 
+    let loadedFromApi = false;
     try {
       this.dashboard = await lastValueFrom(this.routeService.getLatest());
       this.selectedRoute = undefined;
@@ -106,6 +110,7 @@ export class RouteDashboard implements OnInit, AfterViewChecked, OnDestroy {
       this.saveDashboard(this.dashboard);
       this.applyDashboardOrderSummary();
       this.errorMessage = '';
+      loadedFromApi = true;
     } catch {
       if (!restored) {
         this.errorMessage = 'ยังไม่มีผลการจัดเส้นทางล่าสุดจาก backend กด “คำนวณเส้นทางใหม่” เพื่อเริ่มต้น';
@@ -115,10 +120,39 @@ export class RouteDashboard implements OnInit, AfterViewChecked, OnDestroy {
       }
     } finally {
       this.isLoading = false;
+      const openedToCalculate = this.activatedRoute.snapshot.queryParamMap.get('calculate') === '1';
+      const savedRoutesCannotBeDrawn = loadedFromApi && this.routesNeedCalculation(this.dashboard);
+      if ((openedToCalculate || savedRoutesCannotBeDrawn) && !this.isShowingCachedRoutes) {
+        if (openedToCalculate) {
+          void this.router.navigate([], {
+            relativeTo: this.activatedRoute,
+            queryParams: { calculate: null },
+            queryParamsHandling: 'merge',
+            replaceUrl: true,
+          });
+        }
+        await this.calculateRoutes();
+        return;
+      }
       this.initializeMap();
       void this.drawRoutes();
       this.refreshView();
     }
+  }
+
+  private routesNeedCalculation(dashboard?: DeliveryRouteResult): boolean {
+    const routes = dashboard?.routes ?? [];
+    if (routes.length === 0) return true;
+    return routes.some((route) => this.routeCannotBeDrawn(route));
+  }
+
+  private routeCannotBeDrawn(route: DeliveryRoute): boolean {
+    if (!route.stops?.length) return true;
+    return route.stops.some((stop) => {
+      const latitude = Number(stop.latitude);
+      const longitude = Number(stop.longitude);
+      return !Number.isFinite(latitude) || !Number.isFinite(longitude);
+    });
   }
 
   private applyDashboardOrderSummary(): void {

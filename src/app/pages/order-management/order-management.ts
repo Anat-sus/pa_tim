@@ -663,7 +663,7 @@ export class OrderManagement implements OnInit, AfterViewInit, OnDestroy {
   goToRouteCalculation(): void {
     this.showToast('🚀 กำลังนำทางไปหน้าคำนวณเส้นทางจัดส่ง...');
     setTimeout(() => {
-      this.router.navigate(['/route-dashboard']).catch(() => {
+      this.router.navigate(['/route-dashboard'], { queryParams: { calculate: '1' } }).catch(() => {
         alert('ระบบพร้อมส่งต่อข้อมูลออเดอร์ทั้ง ' + this.orders().length + ' จุด ไปยังโมดูลจัดเส้นทาง (Route Dashboard)');
       });
     }, 400);
