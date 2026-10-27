@@ -394,6 +394,9 @@ export class Rider implements OnInit, AfterViewInit {
     const points = this.deliveryList.map(p => `${p.lat},${p.lng}`).join('/');
     window.open(`https://www.google.com/maps/dir/${points}`, '_blank');
   }
+    navUrl(p: DeliveryPoint): string {
+    return `https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lng}`;
+  }
 
   async toggleStatus(point: DeliveryPoint): Promise<void> {
     const newStatus = point.status === 'completed' ? 'pending' : 'completed';
