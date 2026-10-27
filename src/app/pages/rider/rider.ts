@@ -81,6 +81,8 @@ export class Rider implements OnInit, AfterViewInit {
 
   deliveryList: DeliveryPoint[] = [];
   private map!: L.Map;
+  private routeRequestId = 0;
+  private roadCache = new Map<string, [number, number][]>();
 
   async ngOnInit(): Promise<void> {
     await this.loadAllDataFromDB();
@@ -352,6 +354,8 @@ export class Rider implements OnInit, AfterViewInit {
   private updateMapMarkers(): void {
     if (!this.map) return;
 
+    this.routeRequestId++;
+
     this.map.eachLayer((layer) => {
       if (layer instanceof L.Marker || layer instanceof L.Polyline) {
         this.map.removeLayer(layer);
@@ -360,22 +364,22 @@ export class Rider implements OnInit, AfterViewInit {
 
     if (this.deliveryList.length === 0) return;
 
-    const latLngs: L.LatLngExpression[] = [];
+    const latLngs: [number, number][] = [];
 
-    this.deliveryList.forEach(point => {
+    this.deliveryList.forEach((point, idx) => {
       const lat = isNaN(point.lat) ? 16.246839 : point.lat;
       const lng = isNaN(point.lng) ? 103.251963 : point.lng;
-      
+
       latLngs.push([lat, lng]);
-      L.marker([lat, lng])
+      L.marker([lat, lng], { icon: this.pinIcon(point, idx) })
         .addTo(this.map)
         .bindPopup(`<b>${point.type === 'pickup' ? point.title : point.customerName}</b><br>${point.address}`);
     });
 
     if (latLngs.length > 0) {
-      L.polyline(latLngs, { color: '#ef4444', weight: 4 }).addTo(this.map);
       const bounds = L.latLngBounds(latLngs);
       this.map.fitBounds(bounds, { padding: [25, 25] });
+      this.drawRoadRoute(latLngs);
     }
 
     setTimeout(() => {
@@ -383,6 +387,60 @@ export class Rider implements OnInit, AfterViewInit {
         this.map.invalidateSize();
       }
     }, 200);
+  }
+
+  // หมุดกลมมีเลขลำดับ ศูนย์กลางอยู่ตรงพิกัด จึงไม่ถูกตัดขอบเหมือนหมุดฟ้าเดิม
+  private pinIcon(point: DeliveryPoint, idx: number): L.DivIcon {
+    const isPickup = point.type === 'pickup';
+    const bg = isPickup ? '#f59e0b' : '#0f172a';
+    const label = isPickup ? '🍱' : String(idx);
+    return L.divIcon({
+      className: '',
+      html: `<div style="width:30px;height:30px;border-radius:9999px;background:${bg};color:#fff;font:700 14px/30px sans-serif;text-align:center;border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.35)">${label}</div>`,
+      iconSize: [30, 30],
+      iconAnchor: [15, 15],
+      popupAnchor: [0, -15],
+    });
+  }
+
+  // ขอเส้นทางตามถนนผ่าน service ของเพื่อน (ตัวเดียวกับหน้าเส้นทางจัดส่ง)
+  private async drawRoadRoute(points: [number, number][]): Promise<void> {
+    if (points.length < 2 || !this.map) return;
+
+    const requestId = this.routeRequestId;
+    const cacheKey = points.map(([lat, lng]) => `${lat},${lng}`).join('|');
+    const style = { color: '#ef4444', weight: 5, opacity: 0.85 };
+
+    const cached = this.roadCache.get(cacheKey);
+    if (cached) {
+      L.polyline(cached, style).addTo(this.map);
+      return;
+    }
+
+    // เส้นประตรงๆ แสดงไว้ก่อนระหว่างรอ และเป็นตัวสำรองถ้าขอเส้นทางไม่สำเร็จ
+    const fallback = L.polyline(points, { ...style, dashArray: '6 8' }).addTo(this.map);
+
+    try {
+      const response = await lastValueFrom(
+        this.routeService.getRoadGeometry(
+          points.map(([latitude, longitude]) => ({ latitude, longitude }))
+        )
+      );
+      const geometry = response.routes[0]?.geometry.coordinates;
+      if (response.code !== 'Ok' || !geometry?.length) return;
+
+      const roadPath = geometry.map(
+        ([lng, lat]: [number, number]) => [lat, lng] as [number, number]
+      );
+      this.roadCache.set(cacheKey, roadPath);
+
+      // มีการเลือกไรเดอร์ใหม่ระหว่างรอ ให้ทิ้งคำตอบนี้
+      if (requestId !== this.routeRequestId || !this.map) return;
+      this.map.removeLayer(fallback);
+      L.polyline(roadPath, style).addTo(this.map);
+    } catch {
+      // ขอไม่สำเร็จ ปล่อยเส้นประไว้ ไม่ให้หน้าพัง
+    }
   }
 
   openGoogleMaps(): void {
