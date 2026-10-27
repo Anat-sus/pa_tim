@@ -159,7 +159,6 @@ export class Rider implements OnInit, AfterViewInit {
       name: '',
       fullName: '',
       jobId: '',
-      vehicle: 'Wave 110i สีแดง',
       shift: 'รอบส่งด่วนมื้อเที่ยง',
       deadline: '12:30 น.',
       estimatedFinish: 'เสร็จ ~11:41 น.',
