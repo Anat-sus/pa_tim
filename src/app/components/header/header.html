@@ -32,16 +32,15 @@
 
     <div class="flex items-center justify-end justify-self-end">
       <div class="flex items-center rounded-2xl bg-slate-950 p-1 shadow-md shadow-slate-950/20">
-        <a
-          routerLink="/customer-management"
-          [class]="!isRiderMode 
-            ? 'bg-white/10 text-white shadow-sm' 
-            : 'text-slate-400 hover:text-slate-200'"
-          class="flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-bold transition-all no-underline"
-        >
-          <span>🧑‍🍳</span>
-          <span>เจ้าของร้าน</span>
-        </a>
+        @if (!isRiderMode) {
+          <a
+            routerLink="/customer-management"
+            class="flex items-center gap-2 rounded-xl bg-white/10 px-3.5 py-2 text-xs font-bold text-white shadow-sm transition-all no-underline"
+          >
+            <span>🧑‍🍳</span>
+            <span>เจ้าของร้าน</span>
+          </a>
+        }
 
         <a
           routerLink="/rider"
