@@ -23,14 +23,11 @@ export class OrderManagement implements OnInit, AfterViewInit, OnDestroy {
   private customerService = inject(CustomerService);
   private router = inject(Router);
 
-  // Connection & loading state
   isLoading = signal<boolean>(false);
   isConnectedToDb = signal<boolean>(true);
 
-  // Search filter
   searchQuery = signal<string>('');
 
-  // Toast notification
   toastMessage = signal<string | null>(null);
   toastTimeout: any = null;
 
@@ -61,7 +58,6 @@ export class OrderManagement implements OnInit, AfterViewInit, OnDestroy {
       lng: 103.251963,
     };
 
-  // Popular MSU lunch menu list
   menuList = [
     'ข้าวผัดต้มยำทะเล',
     'ข้าวหมูทอดน้ำปลา',
@@ -78,7 +74,7 @@ export class OrderManagement implements OnInit, AfterViewInit, OnDestroy {
     'ข้าวพริกเผาหมูกรอบ',
   ];
 
-  // Customers master pool in MSU Kham Riang & Tha Khon Yang area
+  // Customers master pool
   customerPool = signal<any[]>([
     { id: 1, name: 'คุณพงศกร ใจกล้า', phone: '093-778-8990', address: 'คณะวิทยาศาสตร์ อาคาร SC2', lat: 16.2448, lng: 103.2505 },
     { id: 2, name: 'คุณลลิตา มีสุข', phone: '094-889-9001', address: 'หอพักภูตะวัน ท่าขอนยาง', lat: 16.2492, lng: 103.2541 },
@@ -111,10 +107,10 @@ export class OrderManagement implements OnInit, AfterViewInit, OnDestroy {
     { id: 29, name: 'คุณชาคริต แสงดาว', phone: '085-321-4567', address: 'คณะสถาปัตยกรรมศาสตร์ มมส.', lat: 16.2438, lng: 103.2515 },
   ]);
 
-  // Reactive orders state
+  // จัดการ orders state
   orders = signal<OrderItem[]>([]);
 
-  // Computed totals
+  // คำนวณ ยอดรวม
   totalBoxes = computed(() => {
     return this.orders().reduce((acc, curr) => acc + curr.boxes, 0);
   });
@@ -131,7 +127,7 @@ export class OrderManagement implements OnInit, AfterViewInit, OnDestroy {
     );
   });
 
-  // Helper to check if a customer already has an order in the current orders list
+  // check ว่าลูกค้ามี order รึยัง
   isCustomerOrdered(cust: any): boolean {
     if (!cust) return false;
     return this.orders().some(o => {
@@ -141,7 +137,7 @@ export class OrderManagement implements OnInit, AfterViewInit, OnDestroy {
     });
   }
 
-  // Available customers who DO NOT have an order yet
+  // customers who DO NOT have order yet
   availableCustomers = computed(() => {
     return this.customerPool().filter(c => !this.isCustomerOrdered(c));
   });
@@ -173,12 +169,7 @@ export class OrderManagement implements OnInit, AfterViewInit, OnDestroy {
     }
   }
 
-  /**
-   * Fetch customer master list from live database
-   */
-  /**
- * Fetch customer master list from live database
- */
+  // ดึงข้อมูลลูกค้าจาก db
   async fetchCustomersFromDb(): Promise<void> {
     try {
       const data = await this.customerService.getCustomers();
@@ -199,9 +190,7 @@ export class OrderManagement implements OnInit, AfterViewInit, OnDestroy {
   }
 
 
-  /**
-   * Fetch orders live from Database API
-   */
+  // ดึง orders จาก db API
   fetchOrdersFromDb(): void {
     this.isLoading.set(true);
     this.orderService.getOrders().subscribe({
@@ -262,9 +251,7 @@ export class OrderManagement implements OnInit, AfterViewInit, OnDestroy {
     localStorage.setItem('pa_tim_orders', JSON.stringify(ordersList));
   }
 
-  /**
-   * LocalStorage Fallback
-   */
+  // LocalStorage Fallback
   loadOrdersFromLocalStorageFallback(): void {
     const saved = localStorage.getItem('pa_tim_orders');
     if (saved) {
@@ -282,9 +269,7 @@ export class OrderManagement implements OnInit, AfterViewInit, OnDestroy {
     this.fallbackLocalSimulation(29);
   }
 
-  /**
-   * Initialize Leaflet Map
-   */
+  // สร้าง Leaflet
   private initMap(): void {
     const mapElement = document.getElementById('order-map');
     if (!mapElement) return;
@@ -306,9 +291,7 @@ export class OrderManagement implements OnInit, AfterViewInit, OnDestroy {
     this.renderMarkers();
   }
 
-  /**
-   * Render custom circular markers on the Leaflet map
-   */
+  // Render custom circular markers on the Leaflet map
   renderMarkers(): void {
     if (!this.map || !this.markersLayer) return;
 
@@ -388,9 +371,7 @@ export class OrderManagement implements OnInit, AfterViewInit, OnDestroy {
     }
   }
 
-  /**
-   * Random simulation of 20-30 orders via Database API with seamless fallback
-   */
+  // Random simulation of 20-30 orders via Database API with seamless fallback
   simulateRandomOrders(): void {
     this.isLoading.set(true);
     this.showToast('⏳ กำลังสุ่มออเดอร์ใหม่...');
@@ -407,9 +388,7 @@ export class OrderManagement implements OnInit, AfterViewInit, OnDestroy {
     });
   }
 
-  /**
-   * Fallback local simulation
-   */
+  // Fallback local simulation
   fallbackLocalSimulation(count: number): void {
     this.isLoading.set(false);
     const shuffled = [...this.customerPool()].sort(() => 0.5 - Math.random());
@@ -445,9 +424,7 @@ export class OrderManagement implements OnInit, AfterViewInit, OnDestroy {
     this.showToast(`🎲 สุ่มออเดอร์ใหม่สำเร็จ ${newOrders.length} รายการ (รวม ${this.totalBoxes()} กล่อง)`);
   }
 
-  /**
-   * Search handler
-   */
+  // Search handler
   onSearchChange(): void {
     this.renderMarkers();
   }
@@ -457,9 +434,7 @@ export class OrderManagement implements OnInit, AfterViewInit, OnDestroy {
     this.renderMarkers();
   }
 
-  /**
-   * Open Add Order Modal
-   */
+  // Open Add Order Modal
   openAddModal(): void {
     const nextId = `ORD-${101 + this.orders().length}`;
     const available = this.availableCustomers();
@@ -499,9 +474,7 @@ export class OrderManagement implements OnInit, AfterViewInit, OnDestroy {
     this.formData.lng = cust.lng;
   }
 
-  /**
-   * Handle customer dropdown selection
-   */
+  // Handle customer dropdown selection
   onCustomerChange(customerId: any): void {
     const cid = Number(customerId);
     const selected = this.customerPool().find(c => c.id === cid || c.id === customerId);
@@ -515,9 +488,7 @@ export class OrderManagement implements OnInit, AfterViewInit, OnDestroy {
     }
   }
 
-  /**
-   * Save newly created order to Database POST /orders (with fallback)
-   */
+  // Save newly created order to Database POST /orders (with fallback)
   saveNewOrder(): void {
     if (!this.formData.name || !this.formData.address) {
       this.showToast('⚠️ กรุณาเลือกลูกค้าและสถานที่จัดส่ง');
@@ -570,9 +541,7 @@ export class OrderManagement implements OnInit, AfterViewInit, OnDestroy {
     });
   }
 
-  /**
-   * Open Edit Order Modal
-   */
+  // Open Edit Order Modal
   openEditModal(order: OrderItem): void {
     this.selectedOrder.set(order);
     this.formData = {
@@ -595,9 +564,7 @@ export class OrderManagement implements OnInit, AfterViewInit, OnDestroy {
     this.selectedOrder.set(null);
   }
 
-  /**
-   * Save edited order to Database PATCH /orders/:id (with fallback)
-   */
+  // Save edited order to Database PATCH /orders/:id (with fallback)
   saveEditedOrder(): void {
     const cur = this.selectedOrder();
     if (!cur) return;
@@ -634,9 +601,7 @@ export class OrderManagement implements OnInit, AfterViewInit, OnDestroy {
     });
   }
 
-  /**
-   * Delete order from Database DELETE /orders/:id (with fallback)
-   */
+  // Delete order from Database DELETE /orders/:id (with fallback)
   deleteOrder(order: OrderItem): void {
     if (confirm(`คุณต้องการลบออเดอร์ ${order.id} (${order.name}) ใช่หรือไม่?`)) {
       this.isLoading.set(true);
@@ -657,9 +622,7 @@ export class OrderManagement implements OnInit, AfterViewInit, OnDestroy {
     }
   }
 
-  /**
-   * Navigate to route calculation
-   */
+  // Navigate to route calculation
   goToRouteCalculation(): void {
     this.showToast('🚀 กำลังนำทางไปหน้าคำนวณเส้นทางจัดส่ง...');
     setTimeout(() => {
@@ -669,9 +632,7 @@ export class OrderManagement implements OnInit, AfterViewInit, OnDestroy {
     }, 400);
   }
 
-  /**
-   * Toast helper
-   */
+  // Toast helper
   showToast(msg: string): void {
     if (this.toastTimeout) {
       clearTimeout(this.toastTimeout);
@@ -680,5 +641,37 @@ export class OrderManagement implements OnInit, AfterViewInit, OnDestroy {
     this.toastTimeout = setTimeout(() => {
       this.toastMessage.set(null);
     }, 3200);
+  }
+
+  clearAllOrder(): void {
+    if (this.orders().length === 0) {
+      this.showToast('ℹ️ ไม่มีรายการออเดอร์ในระบบ');
+      return;
+    }
+    if (!confirm(`⚠️ ยืนยันการล้างออเดอร์ทั้งหมด ${this.orders().length} รายการจาก Database ใช่หรือไม่`)) {
+      return;
+    }
+    this.isLoading.set(true);
+    this.showToast('⏳ กำลังล้างข้อมูลออเดอร์...');
+    this.orderService.clearAllOrders().subscribe({
+      next: (res) => {
+        this.orders.set([]);
+        this.saveOrdersToLocal([]);
+        this.renderMarkers();
+        this.isLoading.set(false);
+        this.showToast(`🗑️ ล้างข้อมูลสำเร็จ (ลบไป ${res.affected_row || 0} รายการ)`);
+      },
+      error: (err) => {
+        this.isLoading.set(false);
+        if (err.status === 404) {
+          this.orders.set([]);
+          this.saveOrdersToLocal([]);
+          this.renderMarkers();
+          this.showToast('ℹ️ ไม่มีออเดอร์คงค้างใน Database');
+        } else {
+          this.showToast('❌ ไม่สามารถล้างออเดอร์ได้ (เกิดข้อผิดพลาด)');
+        }
+      }
+    });
   }
 }
