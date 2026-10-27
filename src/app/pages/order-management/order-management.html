@@ -58,6 +58,14 @@
                         <span>🚀</span>
                         <span>ไปคำนวณเส้นทางจัดส่ง</span>
                     </button>
+
+                    <!-- Button: Clear all Order -->
+                    <button type="button" (click)="clearAllOrder()" [disabled]="orders().length === 0 || isLoading()"
+                        class="inline-flex items-center gap-1.5 bg-white hover:bg-rose-50 active:scale-95 text-rose-600 font-medium text-xs md:text-sm px-4 md:px-5 py-2.5 rounded-full border border-rose-200 hover:border-rose-300 shadow-sm transition-all duration-150 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:pointer-events-none"
+                        title="ล้างออเดอร์ทั้งหมดในระบบ">
+                        <span class="text-base leading-none">🗑️</span>
+                        <span>ล้างออเดอร์ทั้งหมด</span>
+                    </button>
                 </div>
 
             </div>
