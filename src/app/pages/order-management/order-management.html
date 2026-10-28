@@ -294,10 +294,8 @@
                     <select [ngModel]="formData.customer_id" (ngModelChange)="onCustomerChange($event)"
                         class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs md:text-sm focus:outline-none focus:border-orange-500 cursor-pointer">
                         <option [value]="null" disabled>-- กรุณาเลือกลูกค้า --</option>
-                        <option *ngFor="let cust of customerPool()" [value]="cust.id"
-                            [disabled]="isCustomerOrdered(cust)">
-                            {{ cust.name }} ({{ cust.address }}) {{ isCustomerOrdered(cust) ? '— [มีออเดอร์แล้ว]' : ''
-                            }}
+                        <option *ngFor="let cust of customerPool()" [value]="cust.id">
+                            {{ cust.name }} ({{ cust.address }}) {{ isCustomerOrdered(cust) ? '— [สั่งเพิ่มออเดอร์เดิม]' : '' }}
                         </option>
                     </select>
                 </div>
@@ -357,6 +355,25 @@
                         </button>
                     </div>
                 </div>
+                <!-- กล่องแจ้งเตือนสถานะลูกค้าเดิม -->
+                <div *ngIf="getCustomerCurrentOrder({ id: formData.customer_id, name: formData.name }) as curOrder"
+                    class="p-3 rounded-xl text-xs space-y-1"
+                    [ngClass]="curOrder.boxes >= 3 || (curOrder.boxes + formData.boxes > 3) ? 'bg-rose-50 border border-rose-200 text-rose-700' : 'bg-blue-50 border border-blue-200 text-blue-700'">
+                    <div class="font-bold flex items-center gap-1.5">
+                        <span *ngIf="curOrder.boxes >= 3">🛑 มีออเดอร์ครบ 3 กล่องแล้ว</span>
+                        <span *ngIf="curOrder.boxes < 3 && curOrder.boxes + formData.boxes > 3">⚠️ จำนวนกล่องรวมเกิน 3 กล่อง</span>
+                        <span *ngIf="curOrder.boxes < 3 && curOrder.boxes + formData.boxes <= 3">ℹ️ สั่งเพิ่มเข้าออเดอร์เดิม</span>
+                    </div>
+                    <p *ngIf="curOrder.boxes >= 3">
+                        ลูกค้าท่านนี้มีอยู่แล้ว {{ curOrder.boxes }} กล่อง (เต็มโควตา 3 กล่องแล้ว) ไม่สามารถสั่งเพิ่มได้
+                    </p>
+                    <p *ngIf="curOrder.boxes < 3">
+                        เดิมมีอยู่แล้ว {{ curOrder.boxes }} กล่อง + เพิ่มอีก {{ formData.boxes }} กล่อง = 
+                        <strong>{{ curOrder.boxes + formData.boxes }} กล่อง</strong>
+                        <span *ngIf="curOrder.boxes + formData.boxes > 3" class="text-rose-600 font-bold"> (ไม่อนุญาตเนื่องจากเกิน 3 กล่อง)</span>
+                        <span *ngIf="curOrder.boxes + formData.boxes <= 3" class="text-emerald-700 font-medium"> (ระบบจะไปอัปเดตแถวเดิม ไม่สร้างรายการใหม่)</span>
+                    </p>
+                </div>
             </div>
 
             <div class="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
@@ -365,9 +382,10 @@
                     ยกเลิก
                 </button>
                 <button type="button" (click)="saveNewOrder()"
-                    [disabled]="isCustomerOrdered({ id: formData.customer_id, name: formData.name })"
+                    [disabled]="getCustomerCurrentOrder({ id: formData.customer_id, name: formData.name })?.boxes! >= 3 || 
+                                ((getCustomerCurrentOrder({ id: formData.customer_id, name: formData.name })?.boxes || 0) + formData.boxes > 3)"
                     class="px-5 py-2 rounded-xl text-xs font-semibold bg-orange-600 hover:bg-orange-700 disabled:opacity-40 disabled:cursor-not-allowed text-white transition shadow cursor-pointer">
-                    บันทึกออเดอร์
+                    {{ getCustomerCurrentOrder({ id: formData.customer_id, name: formData.name }) ? 'อัปเดตออเดอร์เดิม' : 'บันทึกออเดอร์' }}
                 </button>
             </div>
         </div>

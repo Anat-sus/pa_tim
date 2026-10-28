@@ -137,6 +137,16 @@ export class OrderManagement implements OnInit, AfterViewInit, OnDestroy {
     });
   }
 
+  // ดึง order เดิมของลูกค้าถ้ามี
+  getCustomerCurrentOrder(cust: any): OrderItem | undefined {
+    if (!cust) return undefined;
+    return this.orders().find(o => {
+      const matchId = cust.id != null && o.customer_id != null && String(cust.id) === String(o.customer_id);
+      const matchName = cust.name && o.name && cust.name.trim().toLowerCase() === o.name.trim().toLowerCase();
+      return matchId || matchName;
+    });
+  }
+
   // customers who DO NOT have order yet
   availableCustomers = computed(() => {
     return this.customerPool().filter(c => !this.isCustomerOrdered(c));
@@ -495,37 +505,100 @@ export class OrderManagement implements OnInit, AfterViewInit, OnDestroy {
       return;
     }
 
-    if (this.isCustomerOrdered({ id: this.formData.customer_id, name: this.formData.name })) {
-      this.showToast('⚠️ ลูกค้ารายนี้มีออเดอร์ในระบบแล้ว ไม่สามารถเพิ่มซ้ำได้');
+    const boxesToAdd = Number(this.formData.boxes) || 1;
+
+    // 1. ตรวจสอบว่าลูกค้ารายนี้มีออร์เดอร์ในรายการอยู่แล้วหรือไม่
+    const existingOrder = this.orders().find(o => 
+      (this.formData.customer_id != null && o.customer_id != null && String(o.customer_id) === String(this.formData.customer_id)) ||
+      (o.name && this.formData.name && o.name.trim().toLowerCase() === this.formData.name.trim().toLowerCase())
+    );
+
+    // 2. ถ้าเป็นลูกค้าเดิมที่มีออร์เดอร์อยู่แล้ว
+    if (existingOrder) {
+      const currentBoxes = Number(existingOrder.boxes) || 0;
+      const totalBoxes = currentBoxes + boxesToAdd;
+
+      // ตรวจสอบ: ถ้ามีครบ 3 กล่องแล้ว หรือรวมกันแล้วเกิน 3 กล่อง -> ปฏิเสธทันที
+      if (currentBoxes >= 3) {
+        this.showToast(`⚠️ คุณ ${existingOrder.name} มีออเดอร์ครบ 3 กล่องแล้ว ไม่สามารถสั่งเพิ่มได้อีก`);
+        return;
+      }
+
+      if (totalBoxes > 3) {
+        this.showToast(`⚠️ คุณ ${existingOrder.name} มีอยู่แล้ว ${currentBoxes} กล่อง สั่งเพิ่มอีก ${boxesToAdd} กล่องไม่ได้ (รวมแล้วเกิน 3 กล่อง)`);
+        return;
+      }
+
+      // ถ้าไม่เกิน 3 กล่อง -> ให้อัปเดตที่รายการเดิม (PATCH) เพื่อไม่ให้เกิดรายการใหม่
+      this.isLoading.set(true);
+      this.orderService.patchOrder(existingOrder.rawId, {
+        boxes: totalBoxes,
+        menu: this.formData.menu || existingOrder.menu
+      }).subscribe({
+        next: () => {
+          this.closeAddModal();
+          this.fetchOrdersFromDb();
+          this.showToast(`✅ อัปเดตออเดอร์เดิมของ ${existingOrder.name} เพิ่มเป็น ${totalBoxes} กล่องเรียบร้อย (ไม่สร้างรายการใหม่)`);
+        },
+        error: (err: any) => {
+          this.isLoading.set(false);
+          if (err?.error?.error) {
+            this.showToast(`⚠️ ${err.error.error}`);
+            return;
+          }
+          // Local fallback
+          const updated = this.orders().map(o => {
+            if (o.id === existingOrder.id) {
+              return { ...o, boxes: totalBoxes, menu: this.formData.menu || o.menu };
+            }
+            return o;
+          });
+          this.orders.set(updated);
+          this.saveOrdersToLocal(updated);
+          this.closeAddModal();
+          this.renderMarkers();
+          this.showToast(`✅ อัปเดตออเดอร์เดิมเป็น ${totalBoxes} กล่องเรียบร้อย`);
+        }
+      });
       return;
     }
 
+    // 3. ถ้าเป็นลูกค้าใหม่ที่ยังไม่มีออร์เดอร์ -> ส่งไปสร้างรายการใหม่ตามปกติ
     const payload = {
       customer_id: this.formData.customer_id || 1,
-      boxes: Number(this.formData.boxes) || 1,
+      boxes: boxesToAdd,
       menu: this.formData.menu || 'ข้าวกะเพราหมูสับไข่ดาว',
       status: 'pending'
     };
 
     this.isLoading.set(true);
     this.orderService.createOrder(payload).subscribe({
-      next: () => {
+      next: (res: any) => {
         this.closeAddModal();
         this.fetchOrdersFromDb();
-        this.showToast('✅ บันทึกออเดอร์ใหม่ลง Database สำเร็จ');
+        const msg = res?.message || '✅ บันทึกออเดอร์ลง Database สำเร็จ';
+        this.showToast(msg);
       },
-      error: () => {
-        // Local fallback
+      error: (err: any) => {
+        this.isLoading.set(false);
+
+        // หาก Backend ตอบกลับข้อผิดพลาด ให้แจ้งเตือนทันที
+        if (err?.error?.error) {
+          this.showToast(`⚠️ ${err.error.error}`);
+          return;
+        }
+
         const now = new Date();
         const timeStr = `${now.getHours()}:${now.getMinutes() < 10 ? '0' : ''}${now.getMinutes()} น.`;
         const newOrder: OrderItem = {
           rawId: Date.now(),
           id: this.formData.id || `ORD-${101 + this.orders().length}`,
+          customer_id: this.formData.customer_id,
           name: this.formData.name,
           phone: this.formData.phone || '081-000-0000',
           address: this.formData.address,
           menu: this.formData.menu,
-          boxes: Number(this.formData.boxes) || 1,
+          boxes: boxesToAdd,
           time: timeStr,
           lat: this.formData.lat,
           lng: this.formData.lng,
@@ -535,12 +608,10 @@ export class OrderManagement implements OnInit, AfterViewInit, OnDestroy {
         this.saveOrdersToLocal(updated);
         this.closeAddModal();
         this.renderMarkers();
-        this.isLoading.set(false);
         this.showToast(`เพิ่มออเดอร์ ${newOrder.id} เรียบร้อยแล้ว`);
       }
     });
   }
-
   // Open Edit Order Modal
   openEditModal(order: OrderItem): void {
     this.selectedOrder.set(order);
@@ -579,7 +650,15 @@ export class OrderManagement implements OnInit, AfterViewInit, OnDestroy {
         this.fetchOrdersFromDb();
         this.showToast(`✅ อัปเดตข้อมูล ${cur.id} ใน Database สำเร็จ`);
       },
-      error: () => {
+      error: (err: any) => {
+        this.isLoading.set(false);
+
+        // หาก Backend ตอบกลับข้อผิดพลาด (เช่น เกิน 3 กล่อง) ให้แจ้งเตือนทันที
+        if (err?.error?.error) {
+          this.showToast(`⚠️ ${err.error.error}`);
+          return;
+        }
+
         // Local fallback (อัปเดตเฉพาะเมนูและจำนวนกล่อง)
         const updated = this.orders().map(o => {
           if (o.id === cur.id) {
@@ -595,7 +674,6 @@ export class OrderManagement implements OnInit, AfterViewInit, OnDestroy {
         this.saveOrdersToLocal(updated);
         this.closeEditModal();
         this.renderMarkers();
-        this.isLoading.set(false);
         this.showToast(`บันทึกการแก้ไข ${cur.id} เรียบร้อย`);
       }
     });

@@ -25,7 +25,7 @@ export class OrderService {
     return this.http.get<DbOrder>(`${this.apiUrl}/${id}`);
   }
 
-  getNearbyOrders(km: number = 2.0): Observable<DbOrder[]> {
+  getNearbyOrders(km: number = 3.0): Observable<DbOrder[]> {
     const params = new HttpParams().set('km', km.toString());
     return this.http.get<DbOrder[]>(`${this.apiUrl}/near`, { params });
   }
